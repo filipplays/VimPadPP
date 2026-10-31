@@ -1,0 +1,47 @@
+[
+  {
+    "id": "action.delete_character",
+    "initial_text": "abc",
+    "initial_caret": 1,
+    "keys": [
+      "x"
+    ],
+    "expected_text": "ac",
+    "expected_caret": 1
+  },
+  {
+    "id": "operator.delete",
+    "initial_text": "one two",
+    "initial_caret": 0,
+    "keys": [
+      "d",
+      "w"
+    ],
+    "expected_text": "two",
+    "expected_caret": 0
+  },
+  {
+    "id": "operator.change",
+    "initial_text": "one two",
+    "initial_caret": 0,
+    "keys": [
+      "c",
+      "w",
+      "X",
+      "Esc"
+    ],
+    "expected_text": "Xtwo",
+    "expected_caret": 1
+  },
+  {
+    "id": "character.replace",
+    "initial_text": "abc",
+    "initial_caret": 1,
+    "keys": [
+      "r",
+      "x"
+    ],
+    "expected_text": "axc",
+    "expected_caret": 2
+  }
+]

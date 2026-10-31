@@ -1,0 +1,367 @@
+[
+  {
+    "id": "motion.counted.end",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "$"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 5
+  },
+  {
+    "id": "motion.counted.1end",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "1",
+      "$"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 5
+  },
+  {
+    "id": "motion.counted.2end",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "2",
+      "$"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 8
+  },
+  {
+    "id": "motion.counted.5end",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "5",
+      "$"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 22
+  },
+  {
+    "id": "motion.counted.G",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "G"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 14
+  },
+  {
+    "id": "motion.counted.1G",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "1",
+      "G"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 3
+  },
+  {
+    "id": "motion.counted.2G",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "2",
+      "G"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 8
+  },
+  {
+    "id": "motion.counted.3G",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "3",
+      "G"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 14
+  },
+  {
+    "id": "motion.counted.99G",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "9",
+      "9",
+      "G"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 14
+  },
+  {
+    "id": "motion.counted.gg",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "g",
+      "g"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 3
+  },
+  {
+    "id": "motion.counted.1gg",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "1",
+      "g",
+      "g"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 3
+  },
+  {
+    "id": "motion.counted.2gg",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "2",
+      "g",
+      "g"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 8
+  },
+  {
+    "id": "motion.counted.3gg",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "3",
+      "g",
+      "g"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 14
+  },
+  {
+    "id": "motion.counted.99gg",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "9",
+      "9",
+      "g",
+      "g"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 14
+  },
+  {
+    "id": "motion.counted.last_line_end",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 14,
+    "keys": [
+      "$"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 22
+  },
+  {
+    "id": "motion.counted.last_line_1end",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 14,
+    "keys": [
+      "1",
+      "$"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 22
+  },
+  {
+    "id": "motion.counted.last_line_2end",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 14,
+    "keys": [
+      "2",
+      "$"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 14
+  },
+  {
+    "id": "motion.counted.last_line_5end",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 14,
+    "keys": [
+      "5",
+      "$"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 14
+  },
+  {
+    "id": "motion.counted.empty_last_line",
+    "initial_text": "abc\r\n",
+    "initial_caret": 1,
+    "keys": [
+      "5",
+      "$"
+    ],
+    "expected_text": "abc\r\n",
+    "expected_caret": 5
+  },
+  {
+    "id": "motion.counted.empty_document",
+    "initial_text": "",
+    "initial_caret": 0,
+    "keys": [
+      "5",
+      "$"
+    ],
+    "expected_text": "",
+    "expected_caret": 0
+  },
+  {
+    "id": "motion.counted.single_line",
+    "initial_text": "abcdef",
+    "initial_caret": 2,
+    "keys": [
+      "5",
+      "$"
+    ],
+    "expected_text": "abcdef",
+    "expected_caret": 2
+  },
+  {
+    "id": "motion.counted.end_column_down",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 1,
+    "keys": [
+      "$",
+      "j",
+      "j"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 22
+  },
+  {
+    "id": "motion.counted.end_column_up",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 14,
+    "keys": [
+      "$",
+      "k",
+      "k"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 5
+  },
+  {
+    "id": "motion.counted.end_column_document_end",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 1,
+    "keys": [
+      "$",
+      "G"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 22
+  },
+  {
+    "id": "motion.counted.end_column_document_start",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 14,
+    "keys": [
+      "$",
+      "g",
+      "g"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 5
+  },
+  {
+    "id": "motion.counted.prefix_count_resets",
+    "initial_text": "abcdef\r\nx\r\n  final text",
+    "initial_caret": 3,
+    "keys": [
+      "2",
+      "g",
+      "g",
+      "G"
+    ],
+    "expected_text": "abcdef\r\nx\r\n  final text",
+    "expected_caret": 14
+  },
+  {
+    "id": "motion.counted.multi_digit_prefix",
+    "initial_text": "abc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc",
+    "initial_caret": 1,
+    "keys": [
+      "1",
+      "2",
+      "g",
+      "g"
+    ],
+    "expected_text": "abc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc\r\nabc",
+    "expected_caret": 56
+  },
+  {
+    "id": "operator.counted.delete_to_end",
+    "initial_text": "one\r\ntwo\r\nthree",
+    "initial_caret": 0,
+    "keys": [
+      "d",
+      "G"
+    ],
+    "expected_text": "",
+    "expected_caret": 0
+  },
+  {
+    "id": "operator.counted.delete_explicit_first_line",
+    "initial_text": "one\r\ntwo\r\nthree",
+    "initial_caret": 0,
+    "keys": [
+      "1",
+      "d",
+      "G"
+    ],
+    "expected_text": "two\r\nthree",
+    "expected_caret": 0
+  },
+  {
+    "id": "operator.counted.delete_counted_line",
+    "initial_text": "one\r\ntwo\r\nthree",
+    "initial_caret": 0,
+    "keys": [
+      "d",
+      "2",
+      "G"
+    ],
+    "expected_text": "three",
+    "expected_caret": 0
+  },
+  {
+    "id": "operator.counted.delete_counted_end",
+    "initial_text": "one\r\ntwo\r\nthree",
+    "initial_caret": 0,
+    "keys": [
+      "d",
+      "2",
+      "$"
+    ],
+    "expected_text": "\r\nthree",
+    "expected_caret": 0
+  },
+  {
+    "id": "operator.counted.delete_end",
+    "initial_text": "one\r\ntwo\r\nthree",
+    "initial_caret": 0,
+    "keys": [
+      "d",
+      "$"
+    ],
+    "expected_text": "\r\ntwo\r\nthree",
+    "expected_caret": 0
+  }
+]

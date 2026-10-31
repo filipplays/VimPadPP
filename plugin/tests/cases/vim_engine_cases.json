@@ -1,0 +1,358 @@
+[
+  {
+    "id": "motion.left",
+    "initial_text": "abc",
+    "initial_caret": 1,
+    "keys": [
+      "h"
+    ],
+    "expected_text": "abc",
+    "expected_caret": 0
+  },
+  {
+    "id": "motion.left_at_line_start",
+    "initial_text": "abc\r\ndef",
+    "initial_caret": 5,
+    "keys": [
+      "h"
+    ],
+    "expected_text": "abc\r\ndef",
+    "expected_caret": 5
+  },
+  {
+    "id": "motion.left_count_at_line_start",
+    "initial_text": "abc\r\ndef",
+    "initial_caret": 5,
+    "keys": [
+      "2",
+      "h"
+    ],
+    "expected_text": "abc\r\ndef",
+    "expected_caret": 5
+  },
+  {
+    "id": "motion.down_different_lengths",
+    "initial_text": "aaaaaaaaaaa\r\nbbbbb\r\nccccccccccc",
+    "initial_caret": 10,
+    "keys": [
+      "2",
+      "j"
+    ],
+    "expected_text": "aaaaaaaaaaa\r\nbbbbb\r\nccccccccccc",
+    "expected_caret": 30
+  },
+  {
+    "id": "motion.down",
+    "initial_text": "a\r\nb\r\nc",
+    "initial_caret": 0,
+    "keys": [
+      "j"
+    ],
+    "expected_text": "a\r\nb\r\nc",
+    "expected_caret": 3
+  },
+  {
+    "id": "motion.up",
+    "initial_text": "a\r\nb\r\nc",
+    "initial_caret": 6,
+    "keys": [
+      "k"
+    ],
+    "expected_text": "a\r\nb\r\nc",
+    "expected_caret": 3
+  },
+  {
+    "id": "motion.up_different_lengths",
+    "initial_text": "aaaaaaaaaaa\r\nbbbbb\r\nccccccccccc",
+    "initial_caret": 30,
+    "keys": [
+      "2",
+      "k"
+    ],
+    "expected_text": "aaaaaaaaaaa\r\nbbbbb\r\nccccccccccc",
+    "expected_caret": 10
+  },
+  {
+    "id": "motion.down_restores_preferred_column",
+    "initial_text": "aaaaaaaaaaa\r\nbbbbb\r\nccccccccccc",
+    "initial_caret": 10,
+    "keys": [
+      "j",
+      "j"
+    ],
+    "expected_text": "aaaaaaaaaaa\r\nbbbbb\r\nccccccccccc",
+    "expected_caret": 30
+  },
+  {
+    "id": "motion.up_restores_preferred_column",
+    "initial_text": "aaaaaaaaaaa\r\nbbbbb\r\nccccccccccc",
+    "initial_caret": 30,
+    "keys": [
+      "k",
+      "k"
+    ],
+    "expected_text": "aaaaaaaaaaa\r\nbbbbb\r\nccccccccccc",
+    "expected_caret": 10
+  },
+  {
+    "id": "motion.right",
+    "initial_text": "abc",
+    "initial_caret": 1,
+    "keys": [
+      "l"
+    ],
+    "expected_text": "abc",
+    "expected_caret": 2
+  },
+  {
+    "id": "motion.line_start",
+    "initial_text": "abc\r\ndef",
+    "initial_caret": 2,
+    "keys": [
+      "0"
+    ],
+    "expected_text": "abc\r\ndef",
+    "expected_caret": 0
+  },
+  {
+    "id": "motion.line_end",
+    "initial_text": "abc\r\ndef",
+    "initial_caret": 0,
+    "keys": [
+      "$"
+    ],
+    "expected_text": "abc\r\ndef",
+    "expected_caret": 2
+  },
+  {
+    "id": "motion.document_end_0",
+    "initial_text": "abc\r\ndef",
+    "initial_caret": 0,
+    "keys": [
+      "G"
+    ],
+    "expected_text": "abc\r\ndef",
+    "expected_caret": 5
+  },
+  {
+    "id": "motion.document_end_1",
+    "initial_text": "abc\r\ndef",
+    "initial_caret": 5,
+    "keys": [
+      "G"
+    ],
+    "expected_text": "abc\r\ndef",
+    "expected_caret": 5
+  },
+  {
+    "id": "prefix.document_start_0",
+    "initial_text": "abc\r\ndef",
+    "initial_caret": 7,
+    "keys": [
+      "g",
+      "g"
+    ],
+    "expected_text": "abc\r\ndef",
+    "expected_caret": 2
+  },
+  {
+    "id": "prefix.document_start_1",
+    "initial_text": "abc\r\ndef",
+    "initial_caret": 2,
+    "keys": [
+      "g",
+      "g"
+    ],
+    "expected_text": "abc\r\ndef",
+    "expected_caret": 2
+  },
+  {
+    "id": "action.paste_after",
+    "initial_text": "one\r\ntwo",
+    "initial_caret": 0,
+    "keys": [
+      "y",
+      "y",
+      "p"
+    ],
+    "expected_text": "one\r\none\r\ntwo",
+    "expected_caret": 5
+  },
+  {
+    "id": "action.paste_before",
+    "initial_text": "one\r\ntwo",
+    "initial_caret": 0,
+    "keys": [
+      "y",
+      "y",
+      "P"
+    ],
+    "expected_text": "one\r\none\r\ntwo",
+    "expected_caret": 0
+  },
+  {
+    "id": "operator.yank",
+    "initial_text": "one\r\ntwo",
+    "initial_caret": 0,
+    "keys": [
+      "y",
+      "y",
+      "P"
+    ],
+    "expected_text": "one\r\none\r\ntwo",
+    "expected_caret": 0
+  },
+  {
+    "id": "character.find_forward",
+    "initial_text": "abcde",
+    "initial_caret": 0,
+    "keys": [
+      "f",
+      "d"
+    ],
+    "expected_text": "abcde",
+    "expected_caret": 3
+  },
+  {
+    "id": "character.find_backward",
+    "initial_text": "abcde",
+    "initial_caret": 4,
+    "keys": [
+      "F",
+      "b"
+    ],
+    "expected_text": "abcde",
+    "expected_caret": 1
+  },
+  {
+    "id": "character.till_forward",
+    "initial_text": "abcde",
+    "initial_caret": 0,
+    "keys": [
+      "t",
+      "d"
+    ],
+    "expected_text": "abcde",
+    "expected_caret": 2
+  },
+  {
+    "id": "character.till_backward",
+    "initial_text": "abcde",
+    "initial_caret": 4,
+    "keys": [
+      "T",
+      "b"
+    ],
+    "expected_text": "abcde",
+    "expected_caret": 2
+  },
+  {
+    "id": "motion.document_end_clamps_column",
+    "initial_text": "abcdef\r\nx",
+    "initial_caret": 4,
+    "keys": [
+      "G"
+    ],
+    "expected_text": "abcdef\r\nx",
+    "expected_caret": 8
+  },
+  {
+    "id": "prefix.document_start_clamps_column",
+    "initial_text": "x\r\nabcdef",
+    "initial_caret": 7,
+    "keys": [
+      "g",
+      "g"
+    ],
+    "expected_text": "x\r\nabcdef",
+    "expected_caret": 0
+  },
+  {
+    "id": "motion.document_end_empty_last_line",
+    "initial_text": "abcdef\r\n",
+    "initial_caret": 4,
+    "keys": [
+      "G"
+    ],
+    "expected_text": "abcdef\r\n",
+    "expected_caret": 8
+  },
+  {
+    "id": "prefix.document_start_empty_first_line",
+    "initial_text": "\r\nabcdef",
+    "initial_caret": 6,
+    "keys": [
+      "g",
+      "g"
+    ],
+    "expected_text": "\r\nabcdef",
+    "expected_caret": 0
+  },
+  {
+    "id": "motion.document_end_preserves_preferred_column",
+    "initial_text": "abcdef\r\nx\r\nabcdef",
+    "initial_caret": 4,
+    "keys": [
+      "j",
+      "G"
+    ],
+    "expected_text": "abcdef\r\nx\r\nabcdef",
+    "expected_caret": 15
+  },
+  {
+    "id": "prefix.document_start_preserves_preferred_column",
+    "initial_text": "abcdef\r\nx\r\nabcdef",
+    "initial_caret": 15,
+    "keys": [
+      "k",
+      "g",
+      "g"
+    ],
+    "expected_text": "abcdef\r\nx\r\nabcdef",
+    "expected_caret": 4
+  },
+  {
+    "id": "motion.document_end_restores_column_after_clamp",
+    "initial_text": "abcdef\r\nx",
+    "initial_caret": 4,
+    "keys": [
+      "G",
+      "k"
+    ],
+    "expected_text": "abcdef\r\nx",
+    "expected_caret": 4
+  },
+  {
+    "id": "prefix.document_start_restores_column_after_clamp",
+    "initial_text": "x\r\nabcdef",
+    "initial_caret": 7,
+    "keys": [
+      "g",
+      "g",
+      "j"
+    ],
+    "expected_text": "x\r\nabcdef",
+    "expected_caret": 7
+  },
+  {
+    "id": "motion.document_end_empty_document",
+    "initial_text": "",
+    "initial_caret": 0,
+    "keys": [
+      "G"
+    ],
+    "expected_text": "",
+    "expected_caret": 0
+  },
+  {
+    "id": "prefix.document_start_empty_document",
+    "initial_text": "",
+    "initial_caret": 0,
+    "keys": [
+      "g",
+      "g"
+    ],
+    "expected_text": "",
+    "expected_caret": 0
+  }
+]

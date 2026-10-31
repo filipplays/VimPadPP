@@ -1,0 +1,146 @@
+[
+  {
+    "id": "operator.prefix.gg.middle",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 11,
+    "keys": [
+      "d",
+      "g",
+      "g"
+    ],
+    "expected_text": "four\r\nfive",
+    "expected_caret": 1
+  },
+  {
+    "id": "operator.prefix.gg.last",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 24,
+    "keys": [
+      "d",
+      "g",
+      "g"
+    ],
+    "expected_text": "",
+    "expected_caret": 0
+  },
+  {
+    "id": "operator.prefix.gg.first",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 1,
+    "keys": [
+      "d",
+      "g",
+      "g"
+    ],
+    "expected_text": "two\r\nthree\r\nfour\r\nfive",
+    "expected_caret": 1
+  },
+  {
+    "id": "operator.prefix.gg.motion_count",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 11,
+    "keys": [
+      "d",
+      "2",
+      "g",
+      "g"
+    ],
+    "expected_text": "one\r\nfour\r\nfive",
+    "expected_caret": 6
+  },
+  {
+    "id": "operator.prefix.gg.operator_count",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 11,
+    "keys": [
+      "2",
+      "d",
+      "g",
+      "g"
+    ],
+    "expected_text": "one\r\nfour\r\nfive",
+    "expected_caret": 6
+  },
+  {
+    "id": "operator.prefix.gg.combined_counts",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 11,
+    "keys": [
+      "2",
+      "d",
+      "2",
+      "g",
+      "g"
+    ],
+    "expected_text": "one\r\ntwo\r\nfive",
+    "expected_caret": 11
+  },
+  {
+    "id": "operator.prefix.gg.forward_target",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 6,
+    "keys": [
+      "d",
+      "4",
+      "g",
+      "g"
+    ],
+    "expected_text": "one\r\nfive",
+    "expected_caret": 6
+  },
+  {
+    "id": "operator.prefix.gg.explicit_one",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 11,
+    "keys": [
+      "d",
+      "1",
+      "g",
+      "g"
+    ],
+    "expected_text": "four\r\nfive",
+    "expected_caret": 1
+  },
+  {
+    "id": "operator.prefix.gg.large_target",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 1,
+    "keys": [
+      "d",
+      "9",
+      "9",
+      "g",
+      "g"
+    ],
+    "expected_text": "",
+    "expected_caret": 0
+  },
+  {
+    "id": "operator.prefix.gg.reset_after_delete",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 11,
+    "keys": [
+      "d",
+      "g",
+      "g",
+      "x"
+    ],
+    "expected_text": "fur\r\nfive",
+    "expected_caret": 1
+  },
+  {
+    "id": "operator.prefix.gg.yank_register",
+    "initial_text": "one\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "initial_caret": 11,
+    "keys": [
+      "y",
+      "g",
+      "g",
+      "g",
+      "g",
+      "P"
+    ],
+    "expected_text": "one\r\ntwo\r\nthree\r\none\r\ntwo\r\nthree\r\nfour\r\nfive",
+    "expected_caret": 0
+  }
+]

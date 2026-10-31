@@ -1,0 +1,7 @@
+port_to_notepadpp
+obsidian
+planning
+plugin/build
+plugin/NEOVIM_PROTOTYPE.md
+plugin/dependencies/**
+**/__pycache__/

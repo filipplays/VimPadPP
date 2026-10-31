@@ -1,0 +1,163 @@
+[
+  {
+    "id": "motion.word_forward",
+    "initial_text": "foo.bar",
+    "initial_caret": 0,
+    "keys": [
+      "w"
+    ],
+    "expected_text": "foo.bar",
+    "expected_caret": 3
+  },
+  {
+    "id": "motion.two_word_forward",
+    "initial_text": "foo.bar",
+    "initial_caret": 0,
+    "keys": [
+      "2",
+      "w"
+    ],
+    "expected_text": "foo.bar",
+    "expected_caret": 4
+  },
+  {
+    "id": "motion.WORD_forward",
+    "initial_text": "foo.bar",
+    "initial_caret": 0,
+    "keys": [
+      "W"
+    ],
+    "expected_text": "foo.bar",
+    "expected_caret": 6
+  },
+  {
+    "id": "motion.WORD_forward_new_line",
+    "initial_text": "foo.bar\r\n foo",
+    "initial_caret": 0,
+    "keys": [
+      "W"
+    ],
+    "expected_text": "foo.bar\r\n foo",
+    "expected_caret": 10
+  },
+  {
+    "id": "motion.word_forward_empty_line",
+    "initial_text": "foo.bar\r\n\r\n foo",
+    "initial_caret": 4,
+    "keys": [
+      "w"
+    ],
+    "expected_text": "foo.bar\r\n\r\n foo",
+    "expected_caret": 9
+  },
+  {
+    "id": "motion.WORD_forward_empty_line_0",
+    "initial_text": "foo.bar\r\n\r\n foo",
+    "initial_caret": 0,
+    "keys": [
+      "W"
+    ],
+    "expected_text": "foo.bar\r\n\r\n foo",
+    "expected_caret": 9
+  },
+  {
+    "id": "motion.WORD_forward_empty_line_1",
+    "initial_text": "foo.bar\r\n",
+    "initial_caret": 0,
+    "keys": [
+      "W"
+    ],
+    "expected_text": "foo.bar\r\n",
+    "expected_caret": 9
+  },
+  {
+    "id": "motion.word_backward",
+    "initial_text": "one two",
+    "initial_caret": 7,
+    "keys": [
+      "b"
+    ],
+    "expected_text": "one two",
+    "expected_caret": 4
+  },
+  {
+    "id": "motion.word_back_empty_line",
+    "initial_text": "foo.bar\r\n\r\n foo",
+    "initial_caret": 10,
+    "keys": [
+      "b"
+    ],
+    "expected_text": "foo.bar\r\n\r\n foo",
+    "expected_caret": 7
+  },
+  {
+    "id": "motion.word_end",
+    "initial_text": "one two",
+    "initial_caret": 0,
+    "keys": [
+      "e"
+    ],
+    "expected_text": "one two",
+    "expected_caret": 2
+  },
+  {
+    "id": "motion.word_end_symbols_0",
+    "initial_text": "foo!, bar",
+    "initial_caret": 0,
+    "keys": [
+      "e"
+    ],
+    "expected_text": "foo!, bar",
+    "expected_caret": 2
+  },
+  {
+    "id": "motion.word_end_symbols_1",
+    "initial_text": "foo! bar",
+    "initial_caret": 2,
+    "keys": [
+      "e"
+    ],
+    "expected_text": "foo! bar",
+    "expected_caret": 3
+  },
+  {
+    "id": "motion.word_end_symbols_2",
+    "initial_text": "foo!, bar",
+    "initial_caret": 2,
+    "keys": [
+      "e"
+    ],
+    "expected_text": "foo!, bar",
+    "expected_caret": 4
+  },
+  {
+    "id": "motion.word_end_symbols_3",
+    "initial_text": "foo!, bar",
+    "initial_caret": 4,
+    "keys": [
+      "e"
+    ],
+    "expected_text": "foo!, bar",
+    "expected_caret": 8
+  },
+  {
+    "id": "motion.word_END_symbols_0",
+    "initial_text": "foo!, bar",
+    "initial_caret": 0,
+    "keys": [
+      "E"
+    ],
+    "expected_text": "foo!, bar",
+    "expected_caret": 4
+  },
+  {
+    "id": "motion.word_END_symbols_1",
+    "initial_text": "foo!,  !  .:",
+    "initial_caret": 4,
+    "keys": [
+      "E"
+    ],
+    "expected_text": "foo!,  !  .:",
+    "expected_caret": 7
+  }
+]
