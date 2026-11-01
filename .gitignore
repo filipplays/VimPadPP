@@ -6,3 +6,4 @@ plugin/tests/functional/tmp/
 plugin/NEOVIM_PROTOTYPE.md
 plugin/dependencies/
 **/__pycache__/
+**.nvimlog
