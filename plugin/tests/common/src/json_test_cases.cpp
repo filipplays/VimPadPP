@@ -1,4 +1,4 @@
-#include "JsonTestCases.h"
+#include "json_test_cases.h"
 
 #include <cctype>
 #include <limits>
@@ -36,15 +36,12 @@ class JsonParser
   private:
     [[noreturn]] void Fail(const std::string &sMessage) const
     {
-        throw std::runtime_error(
-            "JSON parse error at byte " + std::to_string(m_nPosition) + ": " +
-            sMessage);
+        throw std::runtime_error("JSON parse error at byte " + std::to_string(m_nPosition) + ": " + sMessage);
     }
 
     void SkipWhitespace()
     {
-        while (m_nPosition < m_sInput.size() &&
-               std::isspace(static_cast<unsigned char>(m_sInput[m_nPosition])))
+        while (m_nPosition < m_sInput.size() && std::isspace(static_cast<unsigned char>(m_sInput[m_nPosition])))
         {
             ++m_nPosition;
         }
@@ -125,21 +122,15 @@ class JsonParser
     LRESULT ParseCaret()
     {
         SkipWhitespace();
-        if (m_nPosition == m_sInput.size() ||
-            !std::isdigit(static_cast<unsigned char>(m_sInput[m_nPosition])))
+        if (m_nPosition == m_sInput.size() || !std::isdigit(static_cast<unsigned char>(m_sInput[m_nPosition])))
         {
             Fail("expected a non-negative integer");
         }
         unsigned long long nValue = 0;
-        while (m_nPosition < m_sInput.size() &&
-               std::isdigit(static_cast<unsigned char>(m_sInput[m_nPosition])))
+        while (m_nPosition < m_sInput.size() && std::isdigit(static_cast<unsigned char>(m_sInput[m_nPosition])))
         {
-            const unsigned int nDigit =
-                static_cast<unsigned int>(m_sInput[m_nPosition++] - '0');
-            if (nValue > (static_cast<unsigned long long>(
-                              std::numeric_limits<LRESULT>::max()) -
-                          nDigit) /
-                             10)
+            const unsigned int nDigit = static_cast<unsigned int>(m_sInput[m_nPosition++] - '0');
+            if (nValue > (static_cast<unsigned long long>(std::numeric_limits<LRESULT>::max()) - nDigit) / 10)
             {
                 Fail("integer is out of range");
             }
@@ -205,11 +196,8 @@ class JsonParser
             }
             return;
         }
-        while (
-            m_nPosition < m_sInput.size() &&
-            !std::isspace(static_cast<unsigned char>(m_sInput[m_nPosition])) &&
-            m_sInput[m_nPosition] != ',' && m_sInput[m_nPosition] != ']' &&
-            m_sInput[m_nPosition] != '}')
+        while (m_nPosition < m_sInput.size() && !std::isspace(static_cast<unsigned char>(m_sInput[m_nPosition])) &&
+               m_sInput[m_nPosition] != ',' && m_sInput[m_nPosition] != ']' && m_sInput[m_nPosition] != '}')
         {
             ++m_nPosition;
         }
@@ -270,8 +258,8 @@ class JsonParser
             Expect('}');
         }
 
-        if (!bIdSet || !bInitialTextSet || !bInitialCaretSet || !bKeysSet ||
-            !bExpectedTextSet || !bExpectedCaretSet || sTestCase.sId.empty())
+        if (!bIdSet || !bInitialTextSet || !bInitialCaretSet || !bKeysSet || !bExpectedTextSet || !bExpectedCaretSet ||
+            sTestCase.sId.empty())
         {
             Fail(
                 "each test case requires id, initial state, keys, and expected "
@@ -285,7 +273,4 @@ class JsonParser
 };
 } // namespace
 
-std::vector<TestCase> ParseTestCasesJson(std::string_view sInput)
-{
-    return JsonParser(sInput).ParseTestCases();
-}
+std::vector<TestCase> ParseTestCasesJson(std::string_view sInput) { return JsonParser(sInput).ParseTestCases(); }

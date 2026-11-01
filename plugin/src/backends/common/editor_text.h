@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ScintillaEditor.h"
+#include "scintilla_editor.h"
 
 class EditorText : public ScintillaEditor
 {

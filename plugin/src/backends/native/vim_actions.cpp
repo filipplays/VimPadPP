@@ -1,12 +1,10 @@
-#include "VimEngine.h"
+#include "vim_engine.h"
 
 #include "ScintillaMessages.h"
 
 namespace
 {
-LRESULT Send(
-    const ScintillaEditor &sEditor, UINT nMessage, WPARAM wParam = 0,
-    LPARAM lParam = 0)
+LRESULT Send(const ScintillaEditor &sEditor, UINT nMessage, WPARAM wParam = 0, LPARAM lParam = 0)
 {
     return sEditor.Send(nMessage, wParam, lParam);
 }
@@ -23,9 +21,7 @@ void VimEngine::ExecuteAction(Command eCommand, int nCount)
     case Command::InsertAfter:
         Send(
             m_hEditor, Scintilla::GOTOPOS,
-            CharacterAt(nPosition) == '\n'
-                ? nPosition
-                : Send(m_hEditor, Scintilla::POSITIONAFTER, nPosition));
+            CharacterAt(nPosition) == '\n' ? nPosition : Send(m_hEditor, Scintilla::POSITIONAFTER, nPosition));
         SetMode(Mode::Insert);
         break;
     case Command::InsertLineStart:
@@ -48,8 +44,7 @@ void VimEngine::ExecuteAction(Command eCommand, int nCount)
         SetMode(Mode::Insert);
         break;
     case Command::DeleteCharacter:
-        for (int nIndex = 0; nIndex < nCount && Caret() < DocumentLength();
-             ++nIndex)
+        for (int nIndex = 0; nIndex < nCount && Caret() < DocumentLength(); ++nIndex)
         {
             Send(
                 m_hEditor, Scintilla::DELETERANGE, Caret(),

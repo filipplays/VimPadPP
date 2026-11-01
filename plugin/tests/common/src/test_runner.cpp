@@ -1,4 +1,4 @@
-#include "TestRunner.h"
+#include "test_runner.h"
 
 #include "ScintillaMessages.h"
 #include "VimMotions.h"
@@ -42,8 +42,7 @@ std::string EscapeForDisplay(const std::string &sText)
             }
             else
             {
-                sStream << "\\x" << std::hex << std::uppercase
-                        << static_cast<int>(cCharacter) << std::dec;
+                sStream << "\\x" << std::hex << std::uppercase << static_cast<int>(cCharacter) << std::dec;
             }
             break;
         }
@@ -82,8 +81,7 @@ std::string EscapeForJson(const std::string &sText)
         default:
             if (cCharacter < 0x20)
             {
-                sStream << "\\u00" << std::hex << std::uppercase
-                        << static_cast<int>(cCharacter) << std::dec;
+                sStream << "\\u00" << std::hex << std::uppercase << static_cast<int>(cCharacter) << std::dec;
             }
             else
             {
@@ -115,24 +113,22 @@ class EditorHarness
         sWindowClass.hInstance     = GetModuleHandleW(nullptr);
         sWindowClass.lpszClassName = kClassName;
         sWindowClass.lpfnWndProc   = DefWindowProcW;
-        if (RegisterClassExW(&sWindowClass) == 0 &&
-            GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        if (RegisterClassExW(&sWindowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
         {
             sError = "could not register the test host window class";
             return false;
         }
 
         m_hParent = CreateWindowExW(
-            0, kClassName, L"VimMotions Functional Tests", WS_OVERLAPPED, 0, 0,
-            100, 100, nullptr, nullptr, sWindowClass.hInstance, nullptr);
+            0, kClassName, L"VimMotions Functional Tests", WS_OVERLAPPED, 0, 0, 100, 100, nullptr, nullptr,
+            sWindowClass.hInstance, nullptr);
         if (m_hParent == nullptr)
         {
             sError = "could not create the test host window";
             return false;
         }
         m_hEditor = CreateWindowExW(
-            0, L"Scintilla", L"", WS_CHILD, 0, 0, 100, 100, m_hParent, nullptr,
-            sWindowClass.hInstance, nullptr);
+            0, L"Scintilla", L"", WS_CHILD, 0, 0, 100, 100, m_hParent, nullptr, sWindowClass.hInstance, nullptr);
         if (m_hEditor == nullptr)
         {
             sError = "could not create the Scintilla test control";
@@ -147,16 +143,12 @@ class EditorHarness
         }
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-function-type"
-        m_pInstallVim = reinterpret_cast<InstallVimFn>(
-            GetProcAddress(m_hVimMotionsModule, "InstallVim"));
-        m_pUninstallVim = reinterpret_cast<UninstallVimFn>(
-            GetProcAddress(m_hVimMotionsModule, "UninstallVim"));
+        m_pInstallVim   = reinterpret_cast<InstallVimFn>(GetProcAddress(m_hVimMotionsModule, "InstallVim"));
+        m_pUninstallVim = reinterpret_cast<UninstallVimFn>(GetProcAddress(m_hVimMotionsModule, "UninstallVim"));
 #pragma GCC diagnostic pop
-        if (m_pInstallVim == nullptr || m_pUninstallVim == nullptr ||
-            !m_pInstallVim(m_hEditor))
+        if (m_pInstallVim == nullptr || m_pUninstallVim == nullptr || !m_pInstallVim(m_hEditor))
         {
-            sError =
-                "could not install VimMotions.dll into the Scintilla control";
+            sError = "could not install VimMotions.dll into the Scintilla control";
             return false;
         }
         m_bInstalled = true;
@@ -173,13 +165,10 @@ class EditorHarness
             return false;
         }
         SendMessageW(m_hEditor, WM_KEYDOWN, VK_ESCAPE, 0);
-        SendMessageW(
-            m_hEditor, SCI_SETTEXT, 0,
-            reinterpret_cast<LPARAM>(sTestCase.sInitialText.c_str()));
+        SendMessageW(m_hEditor, SCI_SETTEXT, 0, reinterpret_cast<LPARAM>(sTestCase.sInitialText.c_str()));
         SendMessageW(m_hEditor, Scintilla::GOTOPOS, sTestCase.nInitialCaret, 0);
         if (sTestCase.nInitialCaret < 0 ||
-            sTestCase.nInitialCaret >
-                SendMessageW(m_hEditor, Scintilla::GETLENGTH, 0, 0))
+            sTestCase.nInitialCaret > SendMessageW(m_hEditor, Scintilla::GETLENGTH, 0, 0))
         {
             sError = "initial_caret is outside the fixture text";
             return false;
@@ -187,8 +176,7 @@ class EditorHarness
         return true;
     }
 
-    bool
-    SendKeys(const std::vector<std::string> &aKeys, std::string &sError) const
+    bool SendKeys(const std::vector<std::string> &aKeys, std::string &sError) const
     {
         for (const std::string &sKey : aKeys)
         {
@@ -201,11 +189,7 @@ class EditorHarness
                 // The Vim subclass consumes WM_CHAR in normal mode; in insert
                 // mode it calls DefSubclassProc, exactly as it does for input
                 // produced by TranslateMessage in the production message loop.
-                SendMessageW(
-                    m_hEditor, WM_CHAR,
-                    static_cast<WPARAM>(
-                        static_cast<unsigned char>(sKey.front())),
-                    0);
+                SendMessageW(m_hEditor, WM_CHAR, static_cast<WPARAM>(static_cast<unsigned char>(sKey.front())), 0);
             }
             else
             {
@@ -218,19 +202,13 @@ class EditorHarness
 
     [[nodiscard]] std::string ReadText() const
     {
-        const LRESULT nLength =
-            SendMessageW(m_hEditor, Scintilla::GETLENGTH, 0, 0);
+        const LRESULT     nLength = SendMessageW(m_hEditor, Scintilla::GETLENGTH, 0, 0);
         std::vector<char> aText(static_cast<std::size_t>(nLength) + 1, '\0');
-        SendMessageW(
-            m_hEditor, SCI_GETTEXT, static_cast<WPARAM>(aText.size()),
-            reinterpret_cast<LPARAM>(aText.data()));
+        SendMessageW(m_hEditor, SCI_GETTEXT, static_cast<WPARAM>(aText.size()), reinterpret_cast<LPARAM>(aText.data()));
         return std::string(aText.data(), static_cast<std::size_t>(nLength));
     }
 
-    [[nodiscard]] LRESULT ReadCaret() const
-    {
-        return SendMessageW(m_hEditor, Scintilla::GETCURRENTPOS, 0, 0);
-    }
+    [[nodiscard]] LRESULT ReadCaret() const { return SendMessageW(m_hEditor, Scintilla::GETCURRENTPOS, 0, 0); }
 
   private:
     void Shutdown()
@@ -272,30 +250,23 @@ TestResult RunTest(const TestCase &sTestCase, const EditorHarness &sHarness)
     TestResult sResult;
     sResult.pTestCase = &sTestCase;
     const auto nStart = std::chrono::steady_clock::now();
-    if (!sHarness.SetFixture(sTestCase, sResult.sError) ||
-        !sHarness.SendKeys(sTestCase.aKeys, sResult.sError))
+    if (!sHarness.SetFixture(sTestCase, sResult.sError) || !sHarness.SendKeys(sTestCase.aKeys, sResult.sError))
     {
         sResult.nElapsedMicroseconds =
-            std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now() - nStart)
-                .count();
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - nStart).count();
         return sResult;
     }
     sResult.sActualText  = sHarness.ReadText();
     sResult.nActualCaret = sHarness.ReadCaret();
-    sResult.bPassed      = sResult.sActualText == sTestCase.sExpectedText &&
-                           sResult.nActualCaret == sTestCase.nExpectedCaret;
+    sResult.bPassed =
+        sResult.sActualText == sTestCase.sExpectedText && sResult.nActualCaret == sTestCase.nExpectedCaret;
     sResult.nElapsedMicroseconds =
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - nStart)
-            .count();
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - nStart).count();
     return sResult;
 }
 } // namespace
 
-bool RunFunctionalTests(
-    const std::vector<TestCase> &aTestCases, std::vector<TestResult> &aResults,
-    std::string &sError)
+bool RunFunctionalTests(const std::vector<TestCase> &aTestCases, std::vector<TestResult> &aResults, std::string &sError)
 {
     EditorHarness sHarness;
     if (!sHarness.Initialize(sError))
@@ -324,8 +295,7 @@ std::string BuildTextReport(const std::vector<TestResult> &aResults)
     sReport << "VimMotions functional test report\n";
     for (const TestResult &sResult : aResults)
     {
-        sReport << (sResult.bPassed ? "[PASS] " : "[FAIL] ")
-                << sResult.pTestCase->sId << " ("
+        sReport << (sResult.bPassed ? "[PASS] " : "[FAIL] ") << sResult.pTestCase->sId << " ("
                 << sResult.nElapsedMicroseconds << " us)\n";
         if (!sResult.bPassed)
         {
@@ -335,17 +305,14 @@ std::string BuildTextReport(const std::vector<TestResult> &aResults)
             }
             else
             {
-                sReport << "  Expected text: \""
-                        << EscapeForDisplay(sResult.pTestCase->sExpectedText)
-                        << "\", caret: " << sResult.pTestCase->nExpectedCaret
-                        << "\n  Actual text:   \""
-                        << EscapeForDisplay(sResult.sActualText)
-                        << "\", caret: " << sResult.nActualCaret << "\n";
+                sReport << "  Expected text: \"" << EscapeForDisplay(sResult.pTestCase->sExpectedText)
+                        << "\", caret: " << sResult.pTestCase->nExpectedCaret << "\n  Actual text:   \""
+                        << EscapeForDisplay(sResult.sActualText) << "\", caret: " << sResult.nActualCaret << "\n";
             }
         }
     }
-    sReport << "Total: " << aResults.size() << ", passed: " << nPassed
-            << ", failed: " << aResults.size() - nPassed << "\n\n";
+    sReport << "Total: " << aResults.size() << ", passed: " << nPassed << ", failed: " << aResults.size() - nPassed
+            << "\n\n";
     return sReport.str();
 }
 
@@ -358,24 +325,17 @@ std::string BuildJsonReport(const std::vector<TestResult> &aResults)
     }
 
     std::ostringstream sReport;
-    sReport << "{\n  \"summary\": {\"total\": " << aResults.size()
-            << ", \"passed\": " << nPassed
-            << ", \"failed\": " << aResults.size() - nPassed
-            << "},\n  \"results\": [\n";
+    sReport << "{\n  \"summary\": {\"total\": " << aResults.size() << ", \"passed\": " << nPassed
+            << ", \"failed\": " << aResults.size() - nPassed << "},\n  \"results\": [\n";
     for (std::size_t nIndex = 0; nIndex < aResults.size(); ++nIndex)
     {
         const TestResult &sResult = aResults[nIndex];
-        sReport << "    {\"id\": \"" << EscapeForJson(sResult.pTestCase->sId)
-                << "\", \"status\": \""
-                << (sResult.bPassed ? "passed" : "failed")
-                << "\", \"duration_us\": " << sResult.nElapsedMicroseconds
-                << ", \"expected\": {\"text\": \""
-                << EscapeForJson(sResult.pTestCase->sExpectedText)
-                << "\", \"caret\": " << sResult.pTestCase->nExpectedCaret
-                << "}, \"actual\": {\"text\": \""
-                << EscapeForJson(sResult.sActualText)
-                << "\", \"caret\": " << sResult.nActualCaret
-                << "}, \"error\": \"" << EscapeForJson(sResult.sError) << "\"}";
+        sReport << "    {\"id\": \"" << EscapeForJson(sResult.pTestCase->sId) << "\", \"status\": \""
+                << (sResult.bPassed ? "passed" : "failed") << "\", \"duration_us\": " << sResult.nElapsedMicroseconds
+                << ", \"expected\": {\"text\": \"" << EscapeForJson(sResult.pTestCase->sExpectedText)
+                << "\", \"caret\": " << sResult.pTestCase->nExpectedCaret << "}, \"actual\": {\"text\": \""
+                << EscapeForJson(sResult.sActualText) << "\", \"caret\": " << sResult.nActualCaret << "}, \"error\": \""
+                << EscapeForJson(sResult.sError) << "\"}";
         if (nIndex + 1 < aResults.size())
         {
             sReport << ',';

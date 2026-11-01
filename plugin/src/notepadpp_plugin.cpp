@@ -1,4 +1,5 @@
-#include "VimMotions.h"
+#include "backends/common/backend_manager.h"
+// #include "VimMotions.h"
 
 #include <commctrl.h>
 
@@ -26,17 +27,18 @@ namespace
 constexpr UINT NPPN_READY    = 1001;
 constexpr UINT NPPN_SHUTDOWN = 1009;
 NppData        g_sNpp{};
+Manager g_xManager;
 
 void AttachViews()
 {
-    InstallVim(g_sNpp.hMainScintilla);
-    InstallVim(g_sNpp.hSecondScintilla);
+    g_xManager.InstallVim(g_sNpp.hMainScintilla);
+    g_xManager.InstallVim(g_sNpp.hSecondScintilla);
 }
 
 void DetachViews()
 {
-    UninstallVim(g_sNpp.hMainScintilla);
-    UninstallVim(g_sNpp.hSecondScintilla);
+    g_xManager.UninstallVim(g_sNpp.hMainScintilla);
+    g_xManager.UninstallVim(g_sNpp.hSecondScintilla);
 }
 
 FuncItem g_aFunctions[] = {

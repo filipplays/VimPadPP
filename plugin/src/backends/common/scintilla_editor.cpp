@@ -1,4 +1,4 @@
-#include "ScintillaEditor.h"
+#include "scintilla_editor.h"
 
 ScintillaEditor::ScintillaEditor(HWND hWindow) : m_hWindow(hWindow) {}
 

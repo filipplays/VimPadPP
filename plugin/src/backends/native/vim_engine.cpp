@@ -1,4 +1,4 @@
-#include "VimEngine.h"
+#include "vim_engine.h"
 
 #include "ScintillaMessages.h"
 
@@ -10,9 +10,7 @@
 
 namespace
 {
-LRESULT Send(
-    const ScintillaEditor &sEditor, UINT nMessage, WPARAM wParam = 0,
-    LPARAM lParam = 0)
+LRESULT Send(const ScintillaEditor &sEditor, UINT nMessage, WPARAM wParam = 0, LPARAM lParam = 0)
 {
     return sEditor.Send(nMessage, wParam, lParam);
 }
@@ -58,8 +56,8 @@ bool VimEngine::HandleCharacter(unsigned char cKey, bool bControl, bool bAlt)
         break;
     }
 
-    std::cout << "Caret: " << Caret() << " Character ASCII: "
-              << static_cast<unsigned int>(CharacterAt(Caret())) << std::endl;
+    std::cout << "Caret: " << Caret() << " Character ASCII: " << static_cast<unsigned int>(CharacterAt(Caret()))
+              << std::endl;
 
     return bResult;
 }
@@ -83,7 +81,7 @@ bool VimEngine::HandleNormalCharacter(unsigned char cKey)
     }
     const auto &sCommand = itCommand->second;
     // A prefix owns the count until its complete command is known.
-    const int nCount = sCommand.eKind == CommandKind::Prefix ? 0 : TakeCount();
+    const int   nCount   = sCommand.eKind == CommandKind::Prefix ? 0 : TakeCount();
     DispatchCommand(sCommand, nCount);
     return true;
 }
@@ -98,37 +96,29 @@ bool VimEngine::HandleOperatorPendingCharacter(unsigned char cKey)
         return true;
     }
     const auto itCommand = m_aCommands.find(cKey);
-    if (itCommand != m_aCommands.end() &&
-        itCommand->second.eKind == CommandKind::Prefix)
+    if (itCommand != m_aCommands.end() && itCommand->second.eKind == CommandKind::Prefix)
     {
         HandlePrefixCommand(itCommand->second.eCommand);
         return true;
     }
     const int nCount = TakeCount();
     if ((m_ePendingOperator == Command::Delete && cKey == 'd') ||
-        (m_ePendingOperator == Command::Change && cKey == 'c') ||
-        (m_ePendingOperator == Command::Yank && cKey == 'y'))
+        (m_ePendingOperator == Command::Change && cKey == 'c') || (m_ePendingOperator == Command::Yank && cKey == 'y'))
     {
-        const LRESULT nStart = LineStart(Caret());
-        const LRESULT nLine =
-            Send(m_hEditor, Scintilla::LINEFROMPOSITION, Caret());
+        const LRESULT nStart     = LineStart(Caret());
+        const LRESULT nLine      = Send(m_hEditor, Scintilla::LINEFROMPOSITION, Caret());
         const LRESULT nLineCount = Send(m_hEditor, Scintilla::GETLINECOUNT);
-        const LRESULT nEnd = nLine + std::max(1, nCount) < nLineCount
-                                 ? Send(
-                                       m_hEditor, Scintilla::POSITIONFROMLINE,
-                                       nLine + std::max(1, nCount))
-                                 : DocumentLength();
+        const LRESULT nEnd       = nLine + std::max(1, nCount) < nLineCount
+                                       ? Send(m_hEditor, Scintilla::POSITIONFROMLINE, nLine + std::max(1, nCount))
+                                       : DocumentLength();
         ApplyOperator(MotionResult{nStart, nStart, nEnd, true});
     }
-    else if (
-        itCommand != m_aCommands.end() &&
-        itCommand->second.eKind == CommandKind::Motion)
+    else if (itCommand != m_aCommands.end() && itCommand->second.eKind == CommandKind::Motion)
     {
         HandleMotionCommand(itCommand->second.eCommand, nCount);
     }
     else if (
-        itCommand != m_aCommands.end() &&
-        itCommand->second.eKind == CommandKind::NeedsCharacter &&
+        itCommand != m_aCommands.end() && itCommand->second.eKind == CommandKind::NeedsCharacter &&
         itCommand->second.eCommand != Command::ReplaceCharacter)
     {
         m_eAwaitingCommand     = itCommand->second.eCommand;
@@ -255,11 +245,8 @@ void VimEngine::SetMode(Mode eMode)
     m_eMode = eMode;
     Send(
         m_hEditor, Scintilla::SETCARETSTYLE,
-        eMode == Mode::Normal ? Scintilla::CARETSTYLE_BLOCK
-                              : Scintilla::CARETSTYLE_LINE);
-    Send(
-        m_hEditor, Scintilla::SETCARETPERIOD,
-        eMode == Mode::Normal ? 0 : m_nInsertCaretPeriod);
+        eMode == Mode::Normal ? Scintilla::CARETSTYLE_BLOCK : Scintilla::CARETSTYLE_LINE);
+    Send(m_hEditor, Scintilla::SETCARETPERIOD, eMode == Mode::Normal ? 0 : m_nInsertCaretPeriod);
 }
 
 void VimEngine::ExecuteAwaitedCharacter(unsigned char cKey)
@@ -272,26 +259,21 @@ void VimEngine::ExecuteAwaitedCharacter(unsigned char cKey)
             Send(
                 m_hEditor, Scintilla::DELETERANGE, Caret(),
                 Send(m_hEditor, Scintilla::POSITIONAFTER, Caret()) - Caret());
-            Send(
-                m_hEditor, Scintilla::ADDTEXT, 1,
-                reinterpret_cast<LPARAM>(&cKey));
+            Send(m_hEditor, Scintilla::ADDTEXT, 1, reinterpret_cast<LPARAM>(&cKey));
             Send(m_hEditor, Scintilla::ENDUNDOACTION);
         }
         return;
     }
-    const bool    bForward = m_eAwaitingCommand == Command::FindForward ||
-                             m_eAwaitingCommand == Command::TillForward;
+    const bool    bForward = m_eAwaitingCommand == Command::FindForward || m_eAwaitingCommand == Command::TillForward;
     const LRESULT nMatch   = FindOnLine(cKey, bForward);
     if (nMatch < 0)
     {
         return;
     }
     const LRESULT nDestination =
-        (m_eAwaitingCommand == Command::TillForward)
-            ? Send(m_hEditor, Scintilla::POSITIONBEFORE, nMatch)
-        : (m_eAwaitingCommand == Command::TillBackward)
-            ? Send(m_hEditor, Scintilla::POSITIONAFTER, nMatch)
-            : nMatch;
+        (m_eAwaitingCommand == Command::TillForward)    ? Send(m_hEditor, Scintilla::POSITIONBEFORE, nMatch)
+        : (m_eAwaitingCommand == Command::TillBackward) ? Send(m_hEditor, Scintilla::POSITIONAFTER, nMatch)
+                                                        : nMatch;
     if (!m_bAwaitingForOperator)
     {
         Send(m_hEditor, Scintilla::GOTOPOS, nDestination);
@@ -300,32 +282,21 @@ void VimEngine::ExecuteAwaitedCharacter(unsigned char cKey)
 
     const LRESULT nCaret = Caret();
     const LRESULT nStart = std::min(nCaret, nDestination);
-    const LRESULT nEnd =
-        bForward ? Send(m_hEditor, Scintilla::POSITIONAFTER, nDestination)
-                 : Send(m_hEditor, Scintilla::POSITIONAFTER, nCaret);
+    const LRESULT nEnd   = bForward ? Send(m_hEditor, Scintilla::POSITIONAFTER, nDestination)
+                                    : Send(m_hEditor, Scintilla::POSITIONAFTER, nCaret);
     ApplyOperator(MotionResult{nDestination, nStart, nEnd, false});
 }
 
-LRESULT VimEngine::Caret() const { return m_hEditor.Caret(); }
-LRESULT VimEngine::DocumentLength() const { return m_hEditor.DocumentLength(); }
-LRESULT VimEngine::LineStart(LRESULT nPosition) const
-{
-    return m_hEditor.LineStart(nPosition);
-}
-LRESULT VimEngine::LineEnd(LRESULT nPosition) const
-{
-    return m_hEditor.LineEnd(nPosition);
-}
-unsigned char VimEngine::CharacterAt(LRESULT nPosition) const
-{
-    return m_hEditor.CharacterAt(nPosition);
-}
+LRESULT       VimEngine::Caret() const { return m_hEditor.Caret(); }
+LRESULT       VimEngine::DocumentLength() const { return m_hEditor.DocumentLength(); }
+LRESULT       VimEngine::LineStart(LRESULT nPosition) const { return m_hEditor.LineStart(nPosition); }
+LRESULT       VimEngine::LineEnd(LRESULT nPosition) const { return m_hEditor.LineEnd(nPosition); }
+unsigned char VimEngine::CharacterAt(LRESULT nPosition) const { return m_hEditor.CharacterAt(nPosition); }
 
 LRESULT VimEngine::NextWordStart(LRESULT nPosition) const
 {
     const LRESULT nLength = DocumentLength();
-    const bool    bWord =
-        nPosition < nLength && IsWordCharacter(CharacterAt(nPosition));
+    const bool    bWord   = nPosition < nLength && IsWordCharacter(CharacterAt(nPosition));
     while (nPosition < nLength && !std::isspace(CharacterAt(nPosition)) &&
            IsWordCharacter(CharacterAt(nPosition)) == bWord)
         nPosition = Send(m_hEditor, Scintilla::POSITIONAFTER, nPosition);
@@ -333,15 +304,11 @@ LRESULT VimEngine::NextWordStart(LRESULT nPosition) const
     {
         if (std::isspace(CharacterAt(nPosition)))
         {
-            if (CharacterAt(nPosition) == '\r' ||
-                CharacterAt(nPosition) == '\n')
+            if (CharacterAt(nPosition) == '\r' || CharacterAt(nPosition) == '\n')
             {
-                const LRESULT nCurrentLine =
-                    Send(m_hEditor, Scintilla::LINEFROMPOSITION, nPosition);
-                const LRESULT nNextLineStart = Send(
-                    m_hEditor, Scintilla::POSITIONFROMLINE, nCurrentLine + 1);
-                const LRESULT nNextLineEnd = Send(
-                    m_hEditor, Scintilla::GETLINEENDPOSITION, nCurrentLine + 1);
+                const LRESULT nCurrentLine   = Send(m_hEditor, Scintilla::LINEFROMPOSITION, nPosition);
+                const LRESULT nNextLineStart = Send(m_hEditor, Scintilla::POSITIONFROMLINE, nCurrentLine + 1);
+                const LRESULT nNextLineEnd   = Send(m_hEditor, Scintilla::GETLINEENDPOSITION, nCurrentLine + 1);
                 if (nNextLineStart >= 0 && nNextLineStart == nNextLineEnd)
                     return nNextLineStart;
             }
@@ -355,57 +322,37 @@ LRESULT VimEngine::NextWordStart(LRESULT nPosition) const
 
 LRESULT VimEngine::PreviousWordStart(LRESULT nPosition) const
 {
-    while (nPosition > 0 &&
-           std::isspace(CharacterAt(
-               Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))))
+    while (nPosition > 0 && std::isspace(CharacterAt(Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))))
     {
-        const LRESULT nPreviousPosition =
-            Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition);
-        if (CharacterAt(nPreviousPosition) == '\r' ||
-            CharacterAt(nPreviousPosition) == '\n')
+        const LRESULT nPreviousPosition = Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition);
+        if (CharacterAt(nPreviousPosition) == '\r' || CharacterAt(nPreviousPosition) == '\n')
         {
-            const LRESULT nPreviousLine =
-                Send(m_hEditor, Scintilla::LINEFROMPOSITION, nPreviousPosition);
-            if (nPreviousLine > 0 &&
-                Send(m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine) ==
-                    Send(
-                        m_hEditor, Scintilla::GETLINEENDPOSITION,
-                        nPreviousLine))
+            const LRESULT nPreviousLine = Send(m_hEditor, Scintilla::LINEFROMPOSITION, nPreviousPosition);
+            if (nPreviousLine > 0 && Send(m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine) ==
+                                         Send(m_hEditor, Scintilla::GETLINEENDPOSITION, nPreviousLine))
             {
-                const LRESULT nNextLineStart = Send(
-                    m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine + 1);
-                return nPosition == nNextLineStart
-                           ? Send(
-                                 m_hEditor, Scintilla::POSITIONFROMLINE,
-                                 nPreviousLine)
-                           : Send(
-                                 m_hEditor, Scintilla::GETLINEENDPOSITION,
-                                 nPreviousLine - 1);
+                const LRESULT nNextLineStart = Send(m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine + 1);
+                return nPosition == nNextLineStart ? Send(m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine)
+                                                   : Send(m_hEditor, Scintilla::GETLINEENDPOSITION, nPreviousLine - 1);
             }
         }
         nPosition = nPreviousPosition;
     }
-    const bool bWord = IsWordCharacter(
-        CharacterAt(Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition)));
-    while (nPosition > 0 &&
-           !std::isspace(CharacterAt(
-               Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))) &&
-           IsWordCharacter(CharacterAt(
-               Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))) == bWord)
+    const bool bWord = IsWordCharacter(CharacterAt(Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition)));
+    while (nPosition > 0 && !std::isspace(CharacterAt(Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))) &&
+           IsWordCharacter(CharacterAt(Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))) == bWord)
         nPosition = Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition);
     return nPosition;
 }
 
 LRESULT VimEngine::WordEnd(LRESULT nPosition) const
 {
-    const LRESULT nLength = DocumentLength();
-    const bool    bStartedOnWhitespace =
-        nPosition < nLength && std::isspace(CharacterAt(nPosition));
+    const LRESULT nLength              = DocumentLength();
+    const bool    bStartedOnWhitespace = nPosition < nLength && std::isspace(CharacterAt(nPosition));
     while (nPosition < nLength && std::isspace(CharacterAt(nPosition)))
         nPosition = Send(m_hEditor, Scintilla::POSITIONAFTER, nPosition);
     if (nPosition >= nLength)
-        return nLength > 0 ? Send(m_hEditor, Scintilla::POSITIONBEFORE, nLength)
-                           : nPosition;
+        return nLength > 0 ? Send(m_hEditor, Scintilla::POSITIONBEFORE, nLength) : nPosition;
 
     const bool bWord     = IsWordCharacter(CharacterAt(nPosition));
     LRESULT    nRunEnd   = nPosition;
@@ -433,13 +380,11 @@ LRESULT VimEngine::WordEnd(LRESULT nPosition) const
     const bool bNextWord  = IsWordCharacter(CharacterAt(nPosition));
     nRunEnd               = nPosition;
     LRESULT nAfterNextRun = nPosition;
-    while (nAfterNextRun < nLength &&
-           !std::isspace(CharacterAt(nAfterNextRun)) &&
+    while (nAfterNextRun < nLength && !std::isspace(CharacterAt(nAfterNextRun)) &&
            IsWordCharacter(CharacterAt(nAfterNextRun)) == bNextWord)
     {
-        nRunEnd = nAfterNextRun;
-        nAfterNextRun =
-            Send(m_hEditor, Scintilla::POSITIONAFTER, nAfterNextRun);
+        nRunEnd       = nAfterNextRun;
+        nAfterNextRun = Send(m_hEditor, Scintilla::POSITIONAFTER, nAfterNextRun);
     }
     return nRunEnd;
 }
@@ -452,7 +397,7 @@ LRESULT VimEngine::NextWORDStart(LRESULT nPosition) const
     while (nPosition < nLength && std::isspace(CharacterAt(nPosition)))
     {
         const unsigned char cCharacter = CharacterAt(nPosition);
-        nPosition = Send(m_hEditor, Scintilla::POSITIONAFTER, nPosition);
+        nPosition                      = Send(m_hEditor, Scintilla::POSITIONAFTER, nPosition);
         if ((cCharacter == '\n' || cCharacter == '\r') && nPosition < nLength &&
             (CharacterAt(nPosition) == '\n' || CharacterAt(nPosition) == '\r'))
             return nPosition;
@@ -462,53 +407,35 @@ LRESULT VimEngine::NextWORDStart(LRESULT nPosition) const
 
 LRESULT VimEngine::PreviousWORDStart(LRESULT nPosition) const
 {
-    while (nPosition > 0 &&
-           !IsWORDCharacter(CharacterAt(
-               Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))))
+    while (nPosition > 0 && !IsWORDCharacter(CharacterAt(Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))))
     {
-        const LRESULT nPreviousPosition =
-            Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition);
-        if (CharacterAt(nPreviousPosition) == '\r' ||
-            CharacterAt(nPreviousPosition) == '\n')
+        const LRESULT nPreviousPosition = Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition);
+        if (CharacterAt(nPreviousPosition) == '\r' || CharacterAt(nPreviousPosition) == '\n')
         {
-            const LRESULT nPreviousLine =
-                Send(m_hEditor, Scintilla::LINEFROMPOSITION, nPreviousPosition);
-            if (nPreviousLine > 0 &&
-                Send(m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine) ==
-                    Send(
-                        m_hEditor, Scintilla::GETLINEENDPOSITION,
-                        nPreviousLine))
+            const LRESULT nPreviousLine = Send(m_hEditor, Scintilla::LINEFROMPOSITION, nPreviousPosition);
+            if (nPreviousLine > 0 && Send(m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine) ==
+                                         Send(m_hEditor, Scintilla::GETLINEENDPOSITION, nPreviousLine))
             {
-                const LRESULT nNextLineStart = Send(
-                    m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine + 1);
-                return nPosition == nNextLineStart
-                           ? Send(
-                                 m_hEditor, Scintilla::POSITIONFROMLINE,
-                                 nPreviousLine)
-                           : Send(
-                                 m_hEditor, Scintilla::GETLINEENDPOSITION,
-                                 nPreviousLine - 1);
+                const LRESULT nNextLineStart = Send(m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine + 1);
+                return nPosition == nNextLineStart ? Send(m_hEditor, Scintilla::POSITIONFROMLINE, nPreviousLine)
+                                                   : Send(m_hEditor, Scintilla::GETLINEENDPOSITION, nPreviousLine - 1);
             }
         }
         nPosition = nPreviousPosition;
     }
-    while (nPosition > 0 &&
-           IsWORDCharacter(CharacterAt(
-               Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))))
+    while (nPosition > 0 && IsWORDCharacter(CharacterAt(Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition))))
         nPosition = Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition);
     return nPosition;
 }
 
 LRESULT VimEngine::WORDEnd(LRESULT nPosition) const
 {
-    const LRESULT nLength = DocumentLength();
-    const bool    bStartedOnWhitespace =
-        nPosition < nLength && std::isspace(CharacterAt(nPosition));
+    const LRESULT nLength              = DocumentLength();
+    const bool    bStartedOnWhitespace = nPosition < nLength && std::isspace(CharacterAt(nPosition));
     while (nPosition < nLength && std::isspace(CharacterAt(nPosition)))
         nPosition = Send(m_hEditor, Scintilla::POSITIONAFTER, nPosition);
     if (nPosition >= nLength)
-        return nLength > 0 ? Send(m_hEditor, Scintilla::POSITIONBEFORE, nLength)
-                           : nPosition;
+        return nLength > 0 ? Send(m_hEditor, Scintilla::POSITIONBEFORE, nLength) : nPosition;
 
     LRESULT nRunEnd   = nPosition;
     LRESULT nAfterRun = nPosition;
@@ -543,9 +470,8 @@ LRESULT VimEngine::FindOnLine(unsigned char cTarget, bool bForward) const
     LRESULT       nPosition = nCaret;
     while (bForward ? nPosition < nBoundary : nPosition > nBoundary)
     {
-        nPosition = bForward
-                        ? Send(m_hEditor, Scintilla::POSITIONAFTER, nPosition)
-                        : Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition);
+        nPosition = bForward ? Send(m_hEditor, Scintilla::POSITIONAFTER, nPosition)
+                             : Send(m_hEditor, Scintilla::POSITIONBEFORE, nPosition);
         if (CharacterAt(nPosition) == cTarget)
             return nPosition;
     }
@@ -559,21 +485,13 @@ int VimEngine::TakeCount()
     m_nCount         = 0;
     // Consume operator and motion counts together only once the motion is
     // complete, including any prefix.
-    if (m_eParserState == ParserState::OperatorPending &&
-        (m_nOperatorCount != 0 || nCount != 0))
+    if (m_eParserState == ParserState::OperatorPending && (m_nOperatorCount != 0 || nCount != 0))
         return static_cast<int>(std::min<std::uint64_t>(
-            static_cast<std::uint64_t>(std::max(1u, m_nOperatorCount)) *
-                std::max(1, nCount),
+            static_cast<std::uint64_t>(std::max(1u, m_nOperatorCount)) * std::max(1, nCount),
             std::numeric_limits<int>::max()));
     return nCount;
 }
 
-bool VimEngine::IsWordCharacter(unsigned char cCharacter)
-{
-    return std::isalnum(cCharacter) || cCharacter == '_';
-}
+bool VimEngine::IsWordCharacter(unsigned char cCharacter) { return std::isalnum(cCharacter) || cCharacter == '_'; }
 
-bool VimEngine::IsWORDCharacter(unsigned char cCharacter)
-{
-    return !std::isspace(cCharacter);
-}
+bool VimEngine::IsWORDCharacter(unsigned char cCharacter) { return !std::isspace(cCharacter); }

@@ -1,9 +1,8 @@
-#include "VimEngine.h"
+#include "vim_engine.h"
 
 void VimEngine::RegisterCommands()
 {
-    const auto Register =
-        [this](unsigned char cKey, CommandKind eKind, Command eCommand)
+    const auto Register = [this](unsigned char cKey, CommandKind eKind, Command eCommand)
     { m_aCommands.emplace(cKey, CommandMetadata{eKind, eCommand}); };
     // Fuzzed 24. 10. 26
     Register('h', CommandKind::Motion, Command::Left);

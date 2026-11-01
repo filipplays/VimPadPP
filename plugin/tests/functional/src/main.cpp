@@ -1,5 +1,5 @@
-#include "JsonTestCases.h"
-#include "TestRunner.h"
+#include "json_test_cases.h"
+#include "test_runner.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -11,9 +11,7 @@
 
 namespace
 {
-bool ReadFile(
-    const std::filesystem::path &sPath, std::string &sContents,
-    std::string &sError)
+bool ReadFile(const std::filesystem::path &sPath, std::string &sContents, std::string &sError)
 {
     std::ifstream sFile(sPath, std::ios::binary);
     if (!sFile)
@@ -21,9 +19,7 @@ bool ReadFile(
         sError = "could not open " + sPath.string();
         return false;
     }
-    sContents.assign(
-        std::istreambuf_iterator<char>(sFile),
-        std::istreambuf_iterator<char>());
+    sContents.assign(std::istreambuf_iterator<char>(sFile), std::istreambuf_iterator<char>());
     if (!sFile.good() && !sFile.eof())
     {
         sError = "could not read " + sPath.string();
@@ -32,9 +28,7 @@ bool ReadFile(
     return true;
 }
 
-bool WriteReport(
-    const std::filesystem::path &sPath, const std::string &sContents,
-    std::string &sError)
+bool WriteReport(const std::filesystem::path &sPath, const std::string &sContents, std::string &sError)
 {
     std::ofstream sFile(sPath, std::ios::binary);
     if (!sFile)
@@ -51,29 +45,23 @@ bool WriteReport(
     return true;
 }
 
-bool ReadTestCases(
-    const std::filesystem::path &sCasesDirectory,
-    std::vector<TestCase> &aTestCases, std::string &sError)
+bool ReadTestCases(const std::filesystem::path &sCasesDirectory, std::vector<TestCase> &aTestCases, std::string &sError)
 {
     std::error_code sFilesystemError;
     if (!std::filesystem::is_directory(sCasesDirectory, sFilesystemError))
     {
-        sError = sFilesystemError ? "could not read test-case directory " +
-                                        sCasesDirectory.string() + ": " +
+        sError = sFilesystemError ? "could not read test-case directory " + sCasesDirectory.string() + ": " +
                                         sFilesystemError.message()
-                                  : "test-case path is not a directory: " +
-                                        sCasesDirectory.string();
+                                  : "test-case path is not a directory: " + sCasesDirectory.string();
         return false;
     }
 
-    std::vector<std::filesystem::path>            aCasePaths;
-    std::filesystem::recursive_directory_iterator sIterator(
-        sCasesDirectory, sFilesystemError);
+    std::vector<std::filesystem::path>                  aCasePaths;
+    std::filesystem::recursive_directory_iterator       sIterator(sCasesDirectory, sFilesystemError);
     const std::filesystem::recursive_directory_iterator sEnd;
     while (!sFilesystemError && sIterator != sEnd)
     {
-        const bool bIsRegularFile =
-            sIterator->is_regular_file(sFilesystemError);
+        const bool bIsRegularFile = sIterator->is_regular_file(sFilesystemError);
         if (sFilesystemError)
         {
             break;
@@ -86,19 +74,17 @@ bool ReadTestCases(
     }
     if (sFilesystemError)
     {
-        sError = "could not enumerate test-case directory " +
-                 sCasesDirectory.string() + ": " + sFilesystemError.message();
+        sError =
+            "could not enumerate test-case directory " + sCasesDirectory.string() + ": " + sFilesystemError.message();
         return false;
     }
     std::sort(
         aCasePaths.begin(), aCasePaths.end(),
-        [](const std::filesystem::path &sLeft,
-           const std::filesystem::path &sRight)
+        [](const std::filesystem::path &sLeft, const std::filesystem::path &sRight)
         { return sLeft.generic_string() < sRight.generic_string(); });
     if (aCasePaths.empty())
     {
-        sError = "no JSON test-case files were found under " +
-                 sCasesDirectory.string();
+        sError = "no JSON test-case files were found under " + sCasesDirectory.string();
         return false;
     }
 
@@ -113,13 +99,11 @@ bool ReadTestCases(
         try
         {
             std::vector<TestCase> aFileTestCases = ParseTestCasesJson(sJson);
-            aTestCases.insert(
-                aTestCases.end(), aFileTestCases.begin(), aFileTestCases.end());
+            aTestCases.insert(aTestCases.end(), aFileTestCases.begin(), aFileTestCases.end());
         }
         catch (const std::exception &sException)
         {
-            sError = "could not parse " + sCasePath.string() + ": " +
-                     sException.what();
+            sError = "could not parse " + sCasePath.string() + ": " + sException.what();
             return false;
         }
     }
@@ -163,11 +147,8 @@ int main(int nArgumentCount, char *aArguments[])
     const std::filesystem::path sReportDirectory(aArguments[2]);
     std::error_code             sFilesystemError;
     std::filesystem::create_directories(sReportDirectory, sFilesystemError);
-    if (sFilesystemError ||
-        !WriteReport(
-            sReportDirectory / "functional-report.txt", sTextReport, sError) ||
-        !WriteReport(
-            sReportDirectory / "functional-report.json", sJsonReport, sError))
+    if (sFilesystemError || !WriteReport(sReportDirectory / "functional-report.txt", sTextReport, sError) ||
+        !WriteReport(sReportDirectory / "functional-report.json", sJsonReport, sError))
     {
         std::cerr << "Could not write test report: " << sError << '\n';
         return 2;
