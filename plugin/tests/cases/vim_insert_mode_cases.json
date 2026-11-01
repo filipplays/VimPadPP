@@ -9,7 +9,7 @@
       "Esc"
     ],
     "expected_text": "aXb",
-    "expected_caret": 2
+    "expected_caret": 1
   },
   {
     "id": "action.insert_after",
@@ -21,7 +21,7 @@
       "Esc"
     ],
     "expected_text": "aXb",
-    "expected_caret": 2
+    "expected_caret": 1
   },
   {
     "id": "action.insert_line_start",
@@ -32,7 +32,7 @@
       "X",
       "Esc"
     ],
-    "expected_text": "X abc",
+    "expected_text": " Xabc",
     "expected_caret": 1
   },
   {
@@ -45,7 +45,7 @@
       "Esc"
     ],
     "expected_text": "abcX",
-    "expected_caret": 4
+    "expected_caret": 3
   },
   {
     "id": "action.open_below",
@@ -57,7 +57,7 @@
       "Esc"
     ],
     "expected_text": "abc\r\nX",
-    "expected_caret": 6
+    "expected_caret": 5
   },
   {
     "id": "action.open_above",
@@ -68,7 +68,7 @@
       "X",
       "Esc"
     ],
-    "expected_text": "\r\nXabc",
-    "expected_caret": 3
+    "expected_text": "X\r\nabc",
+    "expected_caret": 0
   }
 ]

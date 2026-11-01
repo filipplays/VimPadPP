@@ -350,7 +350,7 @@
       "2",
       "$"
     ],
-    "expected_text": "\r\nthree",
+    "expected_text": "three",
     "expected_caret": 0
   },
   {

@@ -83,12 +83,12 @@
   {
     "id": "motion.word_back_empty_line",
     "initial_text": "foo.bar\r\n\r\n foo",
-    "initial_caret": 10,
+    "initial_caret": 12,
     "keys": [
       "b"
     ],
     "expected_text": "foo.bar\r\n\r\n foo",
-    "expected_caret": 7
+    "expected_caret": 9
   },
   {
     "id": "motion.word_end",

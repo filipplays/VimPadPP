@@ -163,16 +163,16 @@ class EditorHarness
         return true;
     }
 
-    bool SetFixture(const TestCase &sTestCase, std::string &sError) const
+    bool SetFixture(const TestCase &sTestCase, std::string &sError)
     {
         // Each fixture needs fresh parser, register, and preferred-column
         // state.
-        if (!m_pUninstallVim(m_hEditor) || !m_pInstallVim(m_hEditor))
+        if (m_bInstalled && !m_pUninstallVim(m_hEditor))
         {
             sError = "could not reset VimMotions.dll for the test case";
             return false;
         }
-        SendMessageW(m_hEditor, WM_KEYDOWN, VK_ESCAPE, 0);
+        m_bInstalled = false;
         SendMessageW(m_hEditor, SCI_SETTEXT, 0, reinterpret_cast<LPARAM>(sTestCase.sInitialText.c_str()));
         SendMessageW(m_hEditor, Scintilla::GOTOPOS, sTestCase.nInitialCaret, 0);
         if (m_bVisible)
@@ -185,6 +185,13 @@ class EditorHarness
             sError = "initial_caret is outside the fixture text";
             return false;
         }
+        if (!m_pInstallVim(m_hEditor))
+        {
+            sError = "could not reset VimMotions.dll for the test case";
+            return false;
+        }
+        m_bInstalled = true;
+        SendMessageW(m_hEditor, WM_KEYDOWN, VK_ESCAPE, 0);
         return true;
     }
 
@@ -280,7 +287,7 @@ void WaitForMessages(std::uint32_t nWaitMilliseconds)
     }
 }
 
-TestResult RunTest(const TestCase &sTestCase, const EditorHarness &sHarness, std::uint32_t nWaitMilliseconds)
+TestResult RunTest(const TestCase &sTestCase, EditorHarness &sHarness, std::uint32_t nWaitMilliseconds)
 {
     TestResult sResult;
     sResult.pTestCase = &sTestCase;

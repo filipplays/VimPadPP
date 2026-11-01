@@ -30,8 +30,8 @@
       "X",
       "Esc"
     ],
-    "expected_text": "Xtwo",
-    "expected_caret": 1
+    "expected_text": "X two",
+    "expected_caret": 0
   },
   {
     "id": "character.replace",
@@ -42,6 +42,6 @@
       "x"
     ],
     "expected_text": "axc",
-    "expected_caret": 2
+    "expected_caret": 1
   }
 ]
