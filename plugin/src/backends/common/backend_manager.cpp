@@ -75,6 +75,17 @@ BOOL Manager::InstallVim(HWND hWindow)
 #endif
     return TRUE;
 }
+BOOL Manager::NotifyCaretMoved(HWND hWindow, LRESULT nPosition)
+{
+    const auto itSession = m_aSessions.find(hWindow);
+    if (itSession == m_aSessions.end())
+    {
+        SetLastError(ERROR_NOT_FOUND);
+        return FALSE;
+    }
+    itSession->second->OnCaretMoved(nPosition);
+    return TRUE;
+}
 BOOL Manager::UninstallVim(HWND hWindow)
 {
     auto itSession = m_aSessions.find(hWindow);

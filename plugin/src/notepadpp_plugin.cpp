@@ -1,3 +1,4 @@
+#include "backends/common/ScintillaMessages.h"
 #include "backends/common/backend_manager.h"
 // #include "VimMotions.h"
 
@@ -26,8 +27,9 @@ namespace
 {
 constexpr UINT NPPN_READY    = 1001;
 constexpr UINT NPPN_SHUTDOWN = 1009;
+constexpr UINT SCN_UPDATEUI  = 2007;
 NppData        g_sNpp{};
-Manager g_xManager;
+Manager        g_xManager;
 
 void AttachViews()
 {
@@ -41,16 +43,12 @@ void DetachViews()
     g_xManager.UninstallVim(g_sNpp.hSecondScintilla);
 }
 
-FuncItem g_aFunctions[] = {
-    {L"Enable Vim motions", AttachViews, 0, false, nullptr}};
+FuncItem g_aFunctions[] = {{L"Enable Vim motions", AttachViews, 0, false, nullptr}};
 } // namespace
 
 extern "C" __declspec(dllexport) void setInfo(NppData sData) { g_sNpp = sData; }
 
-extern "C" __declspec(dllexport) const wchar_t *getName()
-{
-    return L"VIM Motions";
-}
+extern "C" __declspec(dllexport) const wchar_t *getName() { return L"VIM Motions"; }
 
 extern "C" __declspec(dllexport) FuncItem *getFuncsArray(int *pCount)
 {
@@ -64,6 +62,13 @@ extern "C" __declspec(dllexport) void beNotified(SCNotification *pNotification)
         return;
     // SCNotification starts with the Windows NMHDR structure.
     const auto *pHeader = reinterpret_cast<const NMHDR *>(pNotification);
+    if ((pHeader->hwndFrom == g_sNpp.hMainScintilla || pHeader->hwndFrom == g_sNpp.hSecondScintilla) &&
+        pHeader->code == SCN_UPDATEUI)
+    {
+        const LRESULT nPosition = SendMessageW(pHeader->hwndFrom, Scintilla::GETCURRENTPOS, 0, 0);
+        g_xManager.NotifyCaretMoved(pHeader->hwndFrom, nPosition);
+        return;
+    }
     if (pHeader->hwndFrom != g_sNpp.hNotepad)
         return;
     if (pHeader->code == NPPN_READY)
@@ -72,9 +77,6 @@ extern "C" __declspec(dllexport) void beNotified(SCNotification *pNotification)
         DetachViews();
 }
 
-extern "C" __declspec(dllexport) LRESULT messageProc(UINT, WPARAM, LPARAM)
-{
-    return 0;
-}
+extern "C" __declspec(dllexport) LRESULT messageProc(UINT, WPARAM, LPARAM) { return 0; }
 
 extern "C" __declspec(dllexport) BOOL isUnicode() { return TRUE; }

@@ -8,6 +8,7 @@ class Manager
   public:
     BOOL InstallVim(HWND hWindow);
     BOOL UninstallVim(HWND hWindow);
+    BOOL NotifyCaretMoved(HWND hWindow, LRESULT nPosition);
 
   private:
 #if !defined(ENABLE_NATIVE_BACKEND)
