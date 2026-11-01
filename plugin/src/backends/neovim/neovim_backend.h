@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../common/backend_common.h"
+#include "../common/editor_text.h"
 
 #include <cstdint>
 #include <string>
@@ -10,8 +11,9 @@
 class Backend_NVIM : public Backend
 {
   public:
-    BOOL Install(HWND hScintillaWindow) override;
-    BOOL Uninstall(HWND hScintillaWindow) override;
+    explicit Backend_NVIM(HWND hWindow) : Backend(hWindow), m_sEditor(hWindow) {}
+    BOOL Install() override;
+    BOOL Uninstall() override;
 
     BOOL bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) override;
 
@@ -26,7 +28,6 @@ class Backend_NVIM : public Backend
     };
     struct Session
     {
-        HWND        hWindow   = nullptr;
         LRESULT     nDocument = 0;
         HANDLE      hProcess  = nullptr;
         HANDLE      hInput    = nullptr;
@@ -42,28 +43,32 @@ class Backend_NVIM : public Backend
         unsigned    nStateRevision = 0;
         UINT_PTR    nTimer         = 0;
     };
-    Session m_sSession;
-    void    Close(HANDLE &hHandle);
-    void    Stop();
-    void    Number(std::string &sData, uint64_t nValue, int nBytes);
-    void    String(std::string &sData, const std::string &sValue);
-    bool    Read(void *pData, size_t nSize);
-    bool    ReadNumber(int nBytes, uint64_t &nValue);
-    bool    Decode(Value &sValue, int nDepth = 0);
-    void    Array(std::string &sData, size_t nSize);
-    void    Integer(std::string &sData, int64_t nValue);
-    void    Boolean(std::string &sData, bool bValue);
+    Session    m_sSession;
+    EditorText m_sEditor;
+    int        m_nSuppressedChar      = -1;
+    LRESULT    m_nOriginalCaretStyle  = 0;
+    LRESULT    m_nOriginalCaretPeriod = 0;
+    void       CloseHandleAndReset(HANDLE &hHandle);
+    void       StopNeovimProcess();
+    void       AppendBigEndianBytes(std::string &sData, uint64_t nValue, int nBytes);
+    void       AppendMsgPackString(std::string &sData, const std::string &sValue);
+    bool       ReadBytes(void *pData, size_t nSize);
+    bool       ReadBigEndianInteger(int nBytes, uint64_t &nValue);
+    bool       DecodeMsgPackValue(Value &sValue, int nDepth = 0);
+    void       AppendMsgPackArrayHeader(std::string &sData, size_t nSize);
+    void       AppendMsgPackInteger(std::string &sData, int64_t nValue);
+    void       AppendMsgPackBoolean(std::string &sData, bool bValue);
     bool SendRpc(const std::string &sMethod, const std::string &sArguments, unsigned &nId, bool bNotification = false);
-    bool Rpc(const std::string &sMethod, const std::string &sArguments, Value &sResult);
-    std::string StateArguments();
-    bool        RequestState();
-    bool        SyncDocument(const std::string &sText, LRESULT nLine, LRESULT nColumn);
-    std::string Text(HWND hWindow);
-    bool        Supported(const std::string &sText);
-    std::string Normalize(const std::string &sText);
-    std::string RestoreEol(HWND hWindow, const std::string &sText);
-    bool        Start();
-    void        Fail(const wchar_t *pMessage);
-    bool        ApplyState(const Value &sResult);
+    bool CallRpcAndWait(const std::string &sMethod, const std::string &sArguments, Value &sResult);
+    std::string BuildStateArguments();
+    bool        RequestNeovimState();
+    bool        SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT nColumn);
+    std::string GetEditorText();
+    bool        ContainsNoNulBytes(const std::string &sText);
+    std::string NormalizeLineEndingsToLf(const std::string &sText);
+    std::string RestoreDocumentLineEndings(const std::string &sText);
+    bool        StartNeovimProcess();
+    void        StopAndReportError(const wchar_t *pMessage);
+    bool        SyncDocument(const Value &sResult);
     bool        PollResponses();
 };

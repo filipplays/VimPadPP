@@ -5,8 +5,9 @@
 class Backend_NATIVE : public Backend
 {
   public:
-    BOOL Install(HWND hWindow) override;
-    BOOL Uninstall(HWND hWindow) override;
+    explicit Backend_NATIVE(HWND hWindow) : Backend(hWindow) {}
+    BOOL Install() override;
+    BOOL Uninstall() override;
     BOOL
     bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR nId, DWORD_PTR nData) override;
 

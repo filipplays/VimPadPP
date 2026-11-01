@@ -41,6 +41,9 @@ NOTEPADPP_PLUGIN_DIR ?= /Users/filipzevnik/.wine/drive_c/Program Files/Notepad++
 TEST_BUILD_DIR ?= $(BUILD_DIR)
 TEST_APP := $(TEST_BUILD_DIR)/VimMotionsTests.exe
 TEST_CASES_DIR := tests/cases
+TEST_PATH ?= $(TEST_CASES_DIR)
+WAIT_MS ?= 0
+TEST_REPORT_DIR ?= tests/functional/tmp/reports
 TEST_CASES_FORMATTER := $(TEST_CASES_DIR)/format_test_cases.py
 TEST_CASES := $(shell find $(TEST_CASES_DIR) -type f -name '*.json' -print)
 TEST_COMMON_SOURCES := tests/common/src/json_test_cases.cpp tests/common/src/test_runner.cpp
@@ -199,11 +202,14 @@ $(TEST_APP): $(TEST_SOURCES) $(TEST_HEADERS) src/backends/common/VimMotions.h sr
 
 # Run from the binary directory so both runtime-loaded DLLs are found beside
 # the test executable. The runner writes text and JSON reports to
-# the selected build directory's test-results/ folder.
+# TEST_REPORT_DIR (default tests/functional/tmp/reports). Set VISIBLE=1 to show
+# the Scintilla test window while the tests run. TEST_PATH selects a JSON file
+# or directory; WAIT_MS sets the delay before checking each result.
 test: testnative
 
 run-tests: format-test-cases $(TEST_APP) $(TEST_CASES)
-	cd "$(TEST_BUILD_DIR)" && wine VimMotionsTests.exe "$(abspath $(TEST_CASES_DIR))" test-results
+	@echo "Test reports: $(abspath $(TEST_REPORT_DIR))"
+	cd "$(TEST_BUILD_DIR)" && wine VimMotionsTests.exe "$(abspath $(TEST_PATH))" "$(abspath $(TEST_REPORT_DIR))" --wait-ms "$(WAIT_MS)" $(if $(filter 1,$(VISIBLE)),--visible)
 
 fuzz-build: $(TEST_APP) $(SCINTILLA_DLL) $(VIM_MOTIONS_DLL)
 

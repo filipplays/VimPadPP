@@ -1,6 +1,7 @@
 #include "neovim_backend.h"
 #include "ScintillaMessages.h"
 
+#include <algorithm>
 #include <commctrl.h>
 #include <cstdint>
 #include <cstring>
@@ -14,18 +15,18 @@ namespace
 void ModuleAnchor() {}
 } // namespace
 
-void Backend_NVIM::Close(HANDLE &hHandle)
+void Backend_NVIM::CloseHandleAndReset(HANDLE &hHandle)
 {
     if (hHandle && hHandle != INVALID_HANDLE_VALUE)
         CloseHandle(hHandle);
     hHandle = nullptr;
 }
-void Backend_NVIM::Stop()
+void Backend_NVIM::StopNeovimProcess()
 {
     if (m_sSession.nTimer)
-        KillTimer(m_sSession.hWindow, m_sSession.nTimer);
+        KillTimer(m_hWindow, m_sSession.nTimer);
     m_sSession.nTimer = 0;
-    Close(m_sSession.hInput);
+    CloseHandleAndReset(m_sSession.hInput);
     if (m_sSession.hProcess)
     {
         if (WaitForSingleObject(m_sSession.hProcess, 1000) != WAIT_OBJECT_0)
@@ -34,21 +35,21 @@ void Backend_NVIM::Stop()
             WaitForSingleObject(m_sSession.hProcess, 1000);
         }
     }
-    Close(m_sSession.hOutput);
-    Close(m_sSession.hProcess);
+    CloseHandleAndReset(m_sSession.hOutput);
+    CloseHandleAndReset(m_sSession.hProcess);
 }
-void Backend_NVIM::Number(std::string &sData, uint64_t nValue, int nBytes)
+void Backend_NVIM::AppendBigEndianBytes(std::string &sData, uint64_t nValue, int nBytes)
 {
     for (int nShift = (nBytes - 1) * 8; nShift >= 0; nShift -= 8)
         sData.push_back(static_cast<char>(nValue >> nShift));
 }
-void Backend_NVIM::String(std::string &sData, const std::string &sValue)
+void Backend_NVIM::AppendMsgPackString(std::string &sData, const std::string &sValue)
 {
     sData.push_back(static_cast<char>(0xdb));
-    Number(sData, sValue.size(), 4);
+    AppendBigEndianBytes(sData, sValue.size(), 4);
     sData += sValue;
 }
-bool Backend_NVIM::Read(void *pData, size_t nSize)
+bool Backend_NVIM::ReadBytes(void *pData, size_t nSize)
 {
     if (m_sSession.bBufferedRead)
     {
@@ -82,24 +83,24 @@ bool Backend_NVIM::Read(void *pData, size_t nSize)
     }
     return true;
 }
-bool Backend_NVIM::ReadNumber(int nBytes, uint64_t &nValue)
+bool Backend_NVIM::ReadBigEndianInteger(int nBytes, uint64_t &nValue)
 {
     nValue = 0;
     for (int nIndex = 0; nIndex < nBytes; ++nIndex)
     {
         unsigned char nByte;
-        if (!Read(&nByte, 1))
+        if (!ReadBytes(&nByte, 1))
             return false;
         nValue = (nValue << 8) | nByte;
     }
     return true;
 }
-bool Backend_NVIM::Decode(Value &sValue, int nDepth)
+bool Backend_NVIM::DecodeMsgPackValue(Value &sValue, int nDepth)
 {
     if (nDepth > 32)
         return false;
     unsigned char nTag;
-    if (!Read(&nTag, 1))
+    if (!ReadBytes(&nTag, 1))
         return false;
     uint64_t nLength = 0;
     if (nTag <= 0x7f)
@@ -134,7 +135,7 @@ bool Backend_NVIM::Decode(Value &sValue, int nDepth)
     else if (nTag >= 0xcc && nTag <= 0xcf)
     {
         sValue.nType = 1;
-        if (!ReadNumber(1 << (nTag - 0xcc), nLength))
+        if (!ReadBigEndianInteger(1 << (nTag - 0xcc), nLength))
             return false;
         sValue.nInteger = static_cast<int64_t>(nLength);
         return true;
@@ -142,7 +143,7 @@ bool Backend_NVIM::Decode(Value &sValue, int nDepth)
     else if (nTag >= 0xd0 && nTag <= 0xd3)
     {
         int nBytes = 1 << (nTag - 0xd0);
-        if (!ReadNumber(nBytes, nLength))
+        if (!ReadBigEndianInteger(nBytes, nLength))
             return false;
         sValue.nType    = 1;
         sValue.nInteger = nBytes == 8 ? static_cast<int64_t>(nLength)
@@ -152,13 +153,13 @@ bool Backend_NVIM::Decode(Value &sValue, int nDepth)
     else if (nTag == 0xd9 || nTag == 0xda || nTag == 0xdb || nTag == 0xc4 || nTag == 0xc5 || nTag == 0xc6)
     {
         sValue.nType = 2;
-        if (!ReadNumber(nTag == 0xd9 || nTag == 0xc4 ? 1 : nTag == 0xda || nTag == 0xc5 ? 2 : 4, nLength))
+        if (!ReadBigEndianInteger(nTag == 0xd9 || nTag == 0xc4 ? 1 : nTag == 0xda || nTag == 0xc5 ? 2 : 4, nLength))
             return false;
     }
     else if (nTag == 0xdc || nTag == 0xdd)
     {
         sValue.nType = 3;
-        if (!ReadNumber(nTag == 0xdc ? 2 : 4, nLength))
+        if (!ReadBigEndianInteger(nTag == 0xdc ? 2 : 4, nLength))
             return false;
     }
     else
@@ -168,25 +169,25 @@ bool Backend_NVIM::Decode(Value &sValue, int nDepth)
     if (sValue.nType == 2)
     {
         sValue.sString.resize(static_cast<size_t>(nLength));
-        return !nLength || Read(sValue.sString.data(), static_cast<size_t>(nLength));
+        return !nLength || ReadBytes(sValue.sString.data(), static_cast<size_t>(nLength));
     }
     sValue.aItems.resize(static_cast<size_t>(nLength));
     for (auto &sItem : sValue.aItems)
-        if (!Decode(sItem, nDepth + 1))
+        if (!DecodeMsgPackValue(sItem, nDepth + 1))
             return false;
     return true;
 }
-void Backend_NVIM::Array(std::string &sData, size_t nSize)
+void Backend_NVIM::AppendMsgPackArrayHeader(std::string &sData, size_t nSize)
 {
     sData.push_back(static_cast<char>(0xdc));
-    Number(sData, nSize, 2);
+    AppendBigEndianBytes(sData, nSize, 2);
 }
-void Backend_NVIM::Integer(std::string &sData, int64_t nValue)
+void Backend_NVIM::AppendMsgPackInteger(std::string &sData, int64_t nValue)
 {
     sData.push_back(static_cast<char>(0xd3));
-    Number(sData, static_cast<uint64_t>(nValue), 8);
+    AppendBigEndianBytes(sData, static_cast<uint64_t>(nValue), 8);
 }
-void Backend_NVIM::Boolean(std::string &sData, bool bValue)
+void Backend_NVIM::AppendMsgPackBoolean(std::string &sData, bool bValue)
 {
     sData.push_back(static_cast<char>(bValue ? 0xc3 : 0xc2));
 }
@@ -199,106 +200,110 @@ bool Backend_NVIM::SendRpc(const std::string &sMethod, const std::string &sArgum
     {
         nId = ++m_sSession.nId;
         sRequest.push_back(static_cast<char>(0xce));
-        Number(sRequest, nId, 4);
+        AppendBigEndianBytes(sRequest, nId, 4);
     }
-    String(sRequest, sMethod);
+    AppendMsgPackString(sRequest, sMethod);
     sRequest += sArguments;
     DWORD nWritten = 0;
-    std::cout << "---Request: " << sRequest << std::endl;
+    // std::cout << "---Request: " << sRequest << std::endl;
     return WriteFile(m_sSession.hInput, sRequest.data(), static_cast<DWORD>(sRequest.size()), &nWritten, nullptr) &&
            nWritten == sRequest.size();
 }
-bool Backend_NVIM::Rpc(const std::string &sMethod, const std::string &sArguments, Value &sResult)
+bool Backend_NVIM::CallRpcAndWait(const std::string &sMethod, const std::string &sArguments, Value &sResult)
 {
     unsigned nId = 0;
     if (!SendRpc(sMethod, sArguments, nId))
         return false;
     Value sResponse;
-    if (!Decode(sResponse) || sResponse.nType != 3 || sResponse.aItems.size() != 4 ||
+    if (!DecodeMsgPackValue(sResponse) || sResponse.nType != 3 || sResponse.aItems.size() != 4 ||
         sResponse.aItems[0].nInteger != 1 || sResponse.aItems[1].nInteger != nId || sResponse.aItems[2].nType != 0)
         return false;
     sResult = std::move(sResponse.aItems[3]);
     return true;
 }
-std::string Backend_NVIM::StateArguments()
+std::string Backend_NVIM::BuildStateArguments()
 {
     std::string sArgs;
-    Array(sArgs, 1);
-    Array(sArgs, 2);
-    Array(sArgs, 2);
-    String(sArgs, "nvim_buf_get_lines");
-    Array(sArgs, 4);
-    Integer(sArgs, 0);
-    Integer(sArgs, 0);
-    Integer(sArgs, -1);
-    Boolean(sArgs, true);
-    Array(sArgs, 2);
-    String(sArgs, "nvim_win_get_cursor");
-    Array(sArgs, 1);
-    Integer(sArgs, 0);
+    AppendMsgPackArrayHeader(sArgs, 1);
+    AppendMsgPackArrayHeader(sArgs, 3);
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackString(sArgs, "nvim_buf_get_lines");
+    AppendMsgPackArrayHeader(sArgs, 4);
+    AppendMsgPackInteger(sArgs, 0);
+    AppendMsgPackInteger(sArgs, 0);
+    AppendMsgPackInteger(sArgs, -1);
+    AppendMsgPackBoolean(sArgs, true);
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackString(sArgs, "nvim_win_get_cursor");
+    AppendMsgPackArrayHeader(sArgs, 1);
+    AppendMsgPackInteger(sArgs, 0);
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackString(sArgs, "nvim_eval");
+    AppendMsgPackArrayHeader(sArgs, 1);
+    AppendMsgPackString(sArgs, "[mode(1), getpos('v')]");
     return sArgs;
 }
-bool Backend_NVIM::RequestState()
+bool Backend_NVIM::RequestNeovimState()
 {
-    std::cout << "Request state" << std::endl;
+    // std::cout << "Request state" << std::endl;
     if (m_sSession.nStateId)
         return true;
     m_sSession.nStateRevision = m_sSession.nRevision;
-    return SendRpc("nvim_call_atomic", StateArguments(), m_sSession.nStateId);
+    return SendRpc("nvim_call_atomic", BuildStateArguments(), m_sSession.nStateId);
 }
-bool Backend_NVIM::SyncDocument(const std::string &sText, LRESULT nLine, LRESULT nColumn)
+bool Backend_NVIM::SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT nColumn)
 {
-    std::cout << "Document SYNC" << std::endl;
+    // std::cout << "Document SYNC" << std::endl;
     std::string sArgs;
-    Array(sArgs, 1);
-    Array(sArgs, 2);
-    Array(sArgs, 2);
-    String(sArgs, "nvim_buf_set_lines");
-    Array(sArgs, 5);
-    Integer(sArgs, 0);
-    Integer(sArgs, 0);
-    Integer(sArgs, -1);
-    Boolean(sArgs, true);
-    std::string sNormalized = Normalize(sText);
+    AppendMsgPackArrayHeader(sArgs, 1);
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackString(sArgs, "nvim_buf_set_lines");
+    AppendMsgPackArrayHeader(sArgs, 5);
+    AppendMsgPackInteger(sArgs, 0);
+    AppendMsgPackInteger(sArgs, 0);
+    AppendMsgPackInteger(sArgs, -1);
+    AppendMsgPackBoolean(sArgs, true);
+    std::string sNormalized = NormalizeLineEndingsToLf(sText);
     size_t      nLines      = 1;
     for (char nChar : sNormalized)
         if (nChar == '\n')
             ++nLines;
-    Array(sArgs, nLines);
+    AppendMsgPackArrayHeader(sArgs, nLines);
     size_t nStart = 0;
     for (size_t nIndex = 0; nIndex <= sNormalized.size(); ++nIndex)
         if (nIndex == sNormalized.size() || sNormalized[nIndex] == '\n')
         {
-            String(sArgs, sNormalized.substr(nStart, nIndex - nStart));
+            AppendMsgPackString(sArgs, sNormalized.substr(nStart, nIndex - nStart));
             nStart = nIndex + 1;
         }
-    Array(sArgs, 2);
-    String(sArgs, "nvim_win_set_cursor");
-    Array(sArgs, 2);
-    Integer(sArgs, 0);
-    Array(sArgs, 2);
-    Integer(sArgs, nLine + 1);
-    Integer(sArgs, nColumn);
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackString(sArgs, "nvim_win_set_cursor");
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackInteger(sArgs, 0);
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackInteger(sArgs, nLine + 1);
+    AppendMsgPackInteger(sArgs, nColumn);
     Value sResult;
-    return Rpc("nvim_call_atomic", sArgs, sResult) && sResult.nType == 3 && sResult.aItems.size() == 2 &&
+    return CallRpcAndWait("nvim_call_atomic", sArgs, sResult) && sResult.nType == 3 && sResult.aItems.size() == 2 &&
            sResult.aItems[1].nType == 0;
 }
-std::string Backend_NVIM::Text(HWND hWindow)
+std::string Backend_NVIM::GetEditorText()
 {
-    size_t      nLength = static_cast<size_t>(SendMessageW(hWindow, Scintilla::GETLENGTH, 0, 0));
+    size_t      nLength = static_cast<size_t>(m_sEditor.DocumentLength());
     std::string sText(nLength + 1, '\0');
-    SendMessageW(hWindow, Scintilla::GETTEXT, nLength + 1, reinterpret_cast<LPARAM>(sText.data()));
+    (void)m_sEditor.Send(Scintilla::GETTEXT, nLength + 1, reinterpret_cast<LPARAM>(sText.data()));
     sText.resize(nLength);
     return sText;
 }
-bool Backend_NVIM::Supported(const std::string &sText)
+bool Backend_NVIM::ContainsNoNulBytes(const std::string &sText)
 {
     for (unsigned char nChar : sText)
         if (nChar == 0)
             return false;
     return true;
 }
-std::string Backend_NVIM::Normalize(const std::string &sText)
+std::string Backend_NVIM::NormalizeLineEndingsToLf(const std::string &sText)
 {
     std::string sResult;
     for (size_t nIndex = 0; nIndex < sText.size(); ++nIndex)
@@ -314,9 +319,9 @@ std::string Backend_NVIM::Normalize(const std::string &sText)
     }
     return sResult;
 }
-std::string Backend_NVIM::RestoreEol(HWND hWindow, const std::string &sText)
+std::string Backend_NVIM::RestoreDocumentLineEndings(const std::string &sText)
 {
-    LRESULT nEol = SendMessageW(hWindow, Scintilla::GETEOLMODE, 0, 0);
+    LRESULT nEol = m_sEditor.Send(Scintilla::GETEOLMODE);
     if (m_sSession.sText.find('\n') != std::string::npos)
         nEol = m_sSession.sText.find("\r\n") != std::string::npos ? Scintilla::EOL_CRLF : Scintilla::EOL_LF;
     else if (m_sSession.sText.find('\r') != std::string::npos)
@@ -331,7 +336,7 @@ std::string Backend_NVIM::RestoreEol(HWND hWindow, const std::string &sText)
             sResult += nChar;
     return sResult;
 }
-bool Backend_NVIM::Start()
+bool Backend_NVIM::StartNeovimProcess()
 {
     HMODULE hModule = nullptr;
     if (!GetModuleHandleExW(
@@ -352,8 +357,8 @@ bool Backend_NVIM::Start()
     if (!CreatePipe(&hChildInput, &m_sSession.hInput, &sSecurity, 0) ||
         !CreatePipe(&m_sSession.hOutput, &hChildOutput, &sSecurity, 0))
     {
-        Close(hChildInput);
-        Close(hChildOutput);
+        CloseHandleAndReset(hChildInput);
+        CloseHandleAndReset(hChildOutput);
         return false;
     }
     SetHandleInformation(m_sSession.hInput, HANDLE_FLAG_INHERIT, 0);
@@ -370,30 +375,34 @@ bool Backend_NVIM::Start()
     BOOL bStarted = CreateProcessW(
         sPath.c_str(), sCommand.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &sStartup,
         &sProcess);
-    Close(hChildInput);
-    Close(hChildOutput);
+    CloseHandleAndReset(hChildInput);
+    CloseHandleAndReset(hChildOutput);
     if (!bStarted)
         return false;
     CloseHandle(sProcess.hThread);
     m_sSession.hProcess = sProcess.hProcess;
     return true;
 }
-void Backend_NVIM::Fail(const wchar_t *pMessage)
+void Backend_NVIM::StopAndReportError(const wchar_t *pMessage)
 {
     m_sSession.bFailed = true;
-    Stop();
-    MessageBoxW(m_sSession.hWindow, pMessage, L"Neovim prototype", MB_OK | MB_ICONERROR);
+    StopNeovimProcess();
+    MessageBoxW(m_hWindow, pMessage, L"Neovim prototype", MB_OK | MB_ICONERROR);
 }
-bool Backend_NVIM::ApplyState(const Value &sResult)
+bool Backend_NVIM::SyncDocument(const Value &sResult)
 {
-    std::cout << "APPLY STATE" << std::endl;
+    // std::cout << "APPLY STATE" << std::endl;
     if (sResult.nType != 3 || sResult.aItems.size() != 2 || sResult.aItems[1].nType != 0 ||
-        sResult.aItems[0].nType != 3 || sResult.aItems[0].aItems.size() != 2)
+        sResult.aItems[0].nType != 3 || sResult.aItems[0].aItems.size() != 3)
         return false;
-    const Value &sLines  = sResult.aItems[0].aItems[0];
-    const Value &sCursor = sResult.aItems[0].aItems[1];
+    const Value &sLines     = sResult.aItems[0].aItems[0];
+    const Value &sCursor    = sResult.aItems[0].aItems[1];
+    const Value &sModeState = sResult.aItems[0].aItems[2];
     if (sLines.nType != 3 || sCursor.nType != 3 || sCursor.aItems.size() != 2 || sCursor.aItems[0].nType != 1 ||
-        sCursor.aItems[1].nType != 1)
+        sCursor.aItems[1].nType != 1 || sModeState.nType != 3 || sModeState.aItems.size() != 2 ||
+        sModeState.aItems[0].nType != 2 || sModeState.aItems[0].sString.empty() || sModeState.aItems[1].nType != 3 ||
+        sModeState.aItems[1].aItems.size() != 4 || sModeState.aItems[1].aItems[1].nType != 1 ||
+        sModeState.aItems[1].aItems[2].nType != 1)
         return false;
     std::string sText;
     for (size_t nIndex = 0; nIndex < sLines.aItems.size(); ++nIndex)
@@ -404,12 +413,10 @@ bool Backend_NVIM::ApplyState(const Value &sResult)
             sText += '\n';
         sText += sLines.aItems[nIndex].sString;
     }
-    HWND hWindow = m_sSession.hWindow;
-    std::cout << "Got text: " << sText << std::endl;
-    if (SendMessageW(hWindow, Scintilla::GETDOCPOINTER, 0, 0) != m_sSession.nDocument ||
-        Text(hWindow) != m_sSession.sText)
+    // std::cout << "Got text: " << sText << std::endl;
+    if (m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument || GetEditorText() != m_sSession.sText)
         return true;
-    const std::string sNewText = RestoreEol(hWindow, sText);
+    const std::string sNewText = RestoreDocumentLineEndings(sText);
     if (sNewText != m_sSession.sText)
     {
         size_t nStart = 0;
@@ -422,20 +429,72 @@ bool Backend_NVIM::ApplyState(const Value &sResult)
             --nOldEnd;
             --nNewEnd;
         }
-        SendMessageW(hWindow, Scintilla::SETTARGETSTART, nStart, 0);
-        SendMessageW(hWindow, Scintilla::SETTARGETEND, nOldEnd, 0);
-        SendMessageW(
-            hWindow, Scintilla::REPLACETARGET, nNewEnd - nStart, reinterpret_cast<LPARAM>(sNewText.data() + nStart));
+        (void)m_sEditor.Send(Scintilla::SETTARGETSTART, nStart);
+        (void)m_sEditor.Send(Scintilla::SETTARGETEND, nOldEnd);
+        (void)m_sEditor.Send(
+            Scintilla::REPLACETARGET, nNewEnd - nStart, reinterpret_cast<LPARAM>(sNewText.data() + nStart));
         m_sSession.sText = sNewText;
     }
-    LRESULT nStart =
-        SendMessageW(hWindow, Scintilla::POSITIONFROMLINE, static_cast<WPARAM>(sCursor.aItems[0].nInteger - 1), 0);
-    SendMessageW(hWindow, Scintilla::GOTOPOS, static_cast<WPARAM>(nStart + sCursor.aItems[1].nInteger), 0);
+    const char cMode   = sModeState.aItems[0].sString[0];
+    const bool bInsert = cMode == 'i' || cMode == 'R';
+    (void)m_sEditor.Send(Scintilla::SETCARETSTYLE, bInsert ? Scintilla::CARETSTYLE_LINE : Scintilla::CARETSTYLE_BLOCK);
+    (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, bInsert ? m_nOriginalCaretPeriod : 0);
+    const LRESULT nLine   = static_cast<LRESULT>(sCursor.aItems[0].nInteger - 1);
+    const LRESULT nStart  = m_sEditor.Send(Scintilla::POSITIONFROMLINE, nLine);
+    const LRESULT nCaret  = nStart + static_cast<LRESULT>(sCursor.aItems[1].nInteger);
+    const bool    bVisual = cMode == 'v' || cMode == 'V' || cMode == '\x16';
+    if (!bVisual)
+        (void)m_sEditor.Send(Scintilla::GOTOPOS, nCaret);
+    else
+    {
+        const Value  &sAnchor      = sModeState.aItems[1];
+        const LRESULT nAnchorLine  = static_cast<LRESULT>(sAnchor.aItems[1].nInteger - 1);
+        const LRESULT nAnchorStart = m_sEditor.Send(Scintilla::POSITIONFROMLINE, nAnchorLine);
+        if (nAnchorLine < 0 || nAnchorStart < 0 || sAnchor.aItems[2].nInteger < 1)
+            return false;
+        const LRESULT nAnchor = nAnchorStart + static_cast<LRESULT>(sAnchor.aItems[2].nInteger - 1);
+        if (cMode == 'V')
+        {
+            const LRESULT nFirst    = std::min(nLine, nAnchorLine);
+            const LRESULT nLast     = std::max(nLine, nAnchorLine);
+            const LRESULT nFirstPos = m_sEditor.Send(Scintilla::POSITIONFROMLINE, nFirst);
+            LRESULT       nEnd      = m_sEditor.Send(Scintilla::POSITIONFROMLINE, nLast + 1);
+            if (nEnd < 0)
+                nEnd = m_sEditor.DocumentLength();
+            (void)m_sEditor.Send(
+                Scintilla::SETSEL, nLine < nAnchorLine ? nEnd : nFirstPos, nLine < nAnchorLine ? nFirstPos : nEnd);
+        }
+        else if (cMode == 'v')
+        {
+            const LRESULT nEnd = m_sEditor.Send(Scintilla::POSITIONAFTER, std::max(nAnchor, nCaret));
+            (void)m_sEditor.Send(
+                Scintilla::SETSEL, nCaret < nAnchor ? nEnd : nAnchor, nCaret < nAnchor ? nCaret : nEnd);
+        }
+        else
+        {
+            const LRESULT nCaretColumn  = m_sEditor.Send(Scintilla::GETCOLUMN, nCaret);
+            const LRESULT nAnchorColumn = m_sEditor.Send(Scintilla::GETCOLUMN, nAnchor);
+            const LRESULT nLeft         = std::min(nCaretColumn, nAnchorColumn);
+            const LRESULT nRight        = std::max(nCaretColumn, nAnchorColumn);
+            (void)m_sEditor.Send(Scintilla::CLEARSELECTIONS);
+            for (LRESULT nRow = std::min(nLine, nAnchorLine); nRow <= std::max(nLine, nAnchorLine); ++nRow)
+            {
+                const LRESULT nLeftPos  = m_sEditor.Send(Scintilla::FINDCOLUMN, nRow, nLeft);
+                const LRESULT nRightPos = m_sEditor.Send(Scintilla::FINDCOLUMN, nRow, nRight);
+                const LRESULT nLineEnd  = m_sEditor.Send(Scintilla::GETLINEENDPOSITION, nRow);
+                const LRESULT nEnd =
+                    nRightPos < nLineEnd ? m_sEditor.Send(Scintilla::POSITIONAFTER, nRightPos) : nLineEnd;
+                (void)m_sEditor.Send(
+                    nRow == std::min(nLine, nAnchorLine) ? Scintilla::SETSELECTION : Scintilla::ADDSELECTION, nEnd,
+                    nLeftPos);
+            }
+        }
+    }
     return true;
 }
 bool Backend_NVIM::PollResponses()
 {
-    std::cout << "--POLL RESPONSE--" << std::endl;
+    // std::cout << "--POLL RESPONSE--" << std::endl;
     DWORD nAvailable = 0;
     if (!PeekNamedPipe(m_sSession.hOutput, nullptr, 0, nullptr, &nAvailable, nullptr))
         return false;
@@ -458,7 +517,7 @@ bool Backend_NVIM::PollResponses()
         m_sSession.nReadOffset   = 0;
         m_sSession.bBufferedRead = true;
         Value sResponse;
-        bool  bComplete          = Decode(sResponse);
+        bool  bComplete          = DecodeMsgPackValue(sResponse);
         m_sSession.bBufferedRead = false;
         if (!bComplete)
             break;
@@ -469,15 +528,15 @@ bool Backend_NVIM::PollResponses()
         m_sSession.nStateId = 0;
         if (m_sSession.nStateRevision != m_sSession.nRevision)
         {
-            if (!RequestState())
+            if (!RequestNeovimState())
                 return false;
         }
-        else if (!ApplyState(sResponse.aItems[3]))
+        else if (!SyncDocument(sResponse.aItems[3]))
             return false;
     }
     if (!m_sSession.nStateId)
     {
-        KillTimer(m_sSession.hWindow, m_sSession.nTimer);
+        KillTimer(m_hWindow, m_sSession.nTimer);
         m_sSession.nTimer = 0;
     }
     return true;
@@ -487,7 +546,7 @@ BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPA
     if (nMessage == WM_TIMER && wParam == m_sSession.nTimer && m_sSession.nTimer)
     {
         if (!PollResponses())
-            Fail(L"Neovim communication failed.");
+            StopAndReportError(L"Neovim communication failed.");
         return TRUE;
     }
     else if ((nMessage == WM_CHAR || nMessage == WM_KEYDOWN) && !m_sSession.bFailed)
@@ -495,26 +554,95 @@ BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPA
         std::string sKey;
         if (nMessage == WM_KEYDOWN)
         {
-            switch (wParam)
+            m_nSuppressedChar   = -1;
+            const bool bControl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            const bool bShift   = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            const bool bAlt     = (GetKeyState(VK_MENU) & 0x8000) != 0;
+            if (bControl && !bAlt && wParam >= 'A' && wParam <= 'Z')
             {
-            case VK_LEFT:
-                sKey = "<Left>";
-                break;
-            case VK_RIGHT:
-                sKey = "<Right>";
-                break;
-            case VK_UP:
-                sKey = "<Up>";
-                break;
-            case VK_DOWN:
-                sKey = "<Down>";
-                break;
-            case VK_DELETE:
-                sKey = "<Del>";
-                break;
-            default:
-                return FALSE;
+                sKey              = std::string("<C-") + static_cast<char>('a' + wParam - 'A') + ">";
+                m_nSuppressedChar = static_cast<int>(wParam - 'A' + 1);
             }
+            else if (
+                bControl && !bAlt &&
+                (wParam == VK_RETURN || wParam == VK_BACK || wParam == VK_TAB || wParam == VK_SPACE))
+            {
+                const char *pName = wParam == VK_RETURN ? "CR"
+                                    : wParam == VK_BACK ? "BS"
+                                    : wParam == VK_TAB  ? "Tab"
+                                                        : "Space";
+                sKey              = std::string("<C-") + pName + ">";
+                m_nSuppressedChar = wParam == VK_RETURN ? 10 : wParam == VK_BACK ? 127 : wParam == VK_TAB ? 9 : 0;
+            }
+            else
+            {
+                const char *pName = nullptr;
+                switch (wParam)
+                {
+                case VK_LEFT:
+                    pName = "Left";
+                    break;
+                case VK_RIGHT:
+                    pName = "Right";
+                    break;
+                case VK_UP:
+                    pName = "Up";
+                    break;
+                case VK_DOWN:
+                    pName = "Down";
+                    break;
+                case VK_DELETE:
+                    pName = "Del";
+                    break;
+                case VK_HOME:
+                    pName = "Home";
+                    break;
+                case VK_END:
+                    pName = "End";
+                    break;
+                case VK_PRIOR:
+                    pName = "PageUp";
+                    break;
+                case VK_NEXT:
+                    pName = "PageDown";
+                    break;
+                case VK_INSERT:
+                    pName = "Insert";
+                    break;
+                default:
+                    break;
+                }
+                if (pName)
+                {
+                    sKey = "<";
+                    if (bControl)
+                        sKey += "C-";
+                    if (bShift)
+                        sKey += "S-";
+                    sKey += pName;
+                    sKey += ">";
+                }
+                else if (wParam >= VK_F1 && wParam <= VK_F12)
+                {
+                    sKey = "<";
+                    if (bControl)
+                        sKey += "C-";
+                    if (bShift)
+                        sKey += "S-";
+                    sKey += "F" + std::to_string(wParam - VK_F1 + 1) + ">";
+                }
+                else
+                {
+                    // TranslateMessage has already queued any WM_CHAR. Consume the
+                    // keydown so Scintilla cannot act before that character arrives.
+                    return TRUE;
+                }
+            }
+        }
+        else if (m_nSuppressedChar == static_cast<int>(wParam))
+        {
+            m_nSuppressedChar = -1;
+            return TRUE;
         }
         else if (wParam == 27)
             sKey = "<Esc>";
@@ -539,36 +667,35 @@ BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPA
                 return TRUE;
             sKey.assign(aUtf8, nBytes);
         }
-        if (SendMessageW(hWindow, Scintilla::GETDOCPOINTER, 0, 0) != m_sSession.nDocument ||
-            Text(hWindow) != m_sSession.sText)
+        if (m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument || GetEditorText() != m_sSession.sText)
         {
-            std::string sText = Text(hWindow);
-            if (!Supported(sText))
+            std::string sText = GetEditorText();
+            if (!ContainsNoNulBytes(sText))
             {
-                Fail(
+                StopAndReportError(
                     L"The Neovim prototype supports ASCII text with LF line "
                     L"endings only.");
                 return TRUE;
             }
-            LRESULT nPosition = SendMessageW(hWindow, Scintilla::GETCURRENTPOS, 0, 0);
-            LRESULT nLine     = SendMessageW(hWindow, Scintilla::LINEFROMPOSITION, nPosition, 0);
-            LRESULT nColumn   = nPosition - SendMessageW(hWindow, Scintilla::POSITIONFROMLINE, nLine, 0);
-            if (m_sSession.nStateId || !SyncDocument(sText, nLine, nColumn))
+            LRESULT nPosition = m_sEditor.Caret();
+            LRESULT nLine     = m_sEditor.Send(Scintilla::LINEFROMPOSITION, nPosition);
+            LRESULT nColumn   = nPosition - m_sEditor.LineStart(nPosition);
+            if (m_sSession.nStateId || !SyncNeovim(sText, nLine, nColumn))
             {
-                Fail(L"Could not synchronize the document with Neovim.");
+                StopAndReportError(L"Could not synchronize the document with Neovim.");
                 return TRUE;
             }
             m_sSession.sText     = sText;
-            m_sSession.nDocument = SendMessageW(hWindow, Scintilla::GETDOCPOINTER, 0, 0);
+            m_sSession.nDocument = m_sEditor.Send(Scintilla::GETDOCPOINTER);
         }
         std::string sArgs;
-        Array(sArgs, 1);
-        String(sArgs, sKey);
+        AppendMsgPackArrayHeader(sArgs, 1);
+        AppendMsgPackString(sArgs, sKey);
         unsigned nUnused = 0;
         ++m_sSession.nRevision;
-        if (!SendRpc("nvim_input", sArgs, nUnused, true) || !RequestState())
+        if (!SendRpc("nvim_input", sArgs, nUnused, true) || !RequestNeovimState())
         {
-            Fail(L"Neovim communication failed.");
+            StopAndReportError(L"Neovim communication failed.");
             return TRUE;
         }
         if (!m_sSession.nTimer)
@@ -577,45 +704,50 @@ BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPA
                 m_sSession.nTimer = NeovimResponseTimerId;
         }
         if (!m_sSession.nTimer)
-            Fail(L"Could not start the Neovim response timer.");
+            StopAndReportError(L"Could not start the Neovim response timer.");
         return TRUE;
     }
     return FALSE;
 }
-BOOL Backend_NVIM::Install(HWND hWindow)
+BOOL Backend_NVIM::Install()
 {
-    m_sSession.hWindow   = hWindow;
-    m_sSession.nDocument = SendMessageW(hWindow, Scintilla::GETDOCPOINTER, 0, 0);
-    m_sSession.sText     = Text(hWindow);
-    if (!Supported(m_sSession.sText))
+    m_nOriginalCaretStyle  = m_sEditor.Send(Scintilla::GETCARETSTYLE);
+    m_nOriginalCaretPeriod = m_sEditor.Send(Scintilla::GETCARETPERIOD);
+    m_sSession.nDocument   = m_sEditor.Send(Scintilla::GETDOCPOINTER);
+    m_sSession.sText       = GetEditorText();
+    if (!ContainsNoNulBytes(m_sSession.sText))
     {
-        Fail(
+        StopAndReportError(
             L"The Neovim prototype does not support NUL bytes "
             L"only.");
         SetLastError(ERROR_NOT_SUPPORTED);
         return FALSE;
     }
-    if (!Start())
+    if (!StartNeovimProcess())
     {
-        Fail(
+        StopAndReportError(
             L"Could not start bundled Neovim. Check that neovim\\bin\\nvim.exe "
             L"is installed beside the plugin.");
         SetLastError(ERROR_PROCESS_ABORTED);
         return FALSE;
     }
-    LRESULT nPosition = SendMessageW(hWindow, Scintilla::GETCURRENTPOS, 0, 0);
-    LRESULT nLine     = SendMessageW(hWindow, Scintilla::LINEFROMPOSITION, nPosition, 0);
-    LRESULT nColumn   = nPosition - SendMessageW(hWindow, Scintilla::POSITIONFROMLINE, nLine, 0);
-    if (!SyncDocument(m_sSession.sText, nLine, nColumn))
+    LRESULT nPosition = m_sEditor.Caret();
+    LRESULT nLine     = m_sEditor.Send(Scintilla::LINEFROMPOSITION, nPosition);
+    LRESULT nColumn   = nPosition - m_sEditor.LineStart(nPosition);
+    if (!SyncNeovim(m_sSession.sText, nLine, nColumn))
     {
-        Fail(L"Neovim initialization failed or timed out.");
+        StopAndReportError(L"Neovim initialization failed or timed out.");
         SetLastError(ERROR_INVALID_DATA);
         return FALSE;
     }
+    (void)m_sEditor.Send(Scintilla::SETCARETSTYLE, Scintilla::CARETSTYLE_BLOCK);
+    (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, 0);
     return TRUE;
 }
-BOOL Backend_NVIM::Uninstall(HWND)
+BOOL Backend_NVIM::Uninstall()
 {
-    Stop();
+    StopNeovimProcess();
+    (void)m_sEditor.Send(Scintilla::SETCARETSTYLE, m_nOriginalCaretStyle);
+    (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, m_nOriginalCaretPeriod);
     return TRUE;
 }

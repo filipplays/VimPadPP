@@ -2,6 +2,8 @@
 #include "test_runner.h"
 
 #include <algorithm>
+#include <charconv>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -45,37 +47,43 @@ bool WriteReport(const std::filesystem::path &sPath, const std::string &sContent
     return true;
 }
 
-bool ReadTestCases(const std::filesystem::path &sCasesDirectory, std::vector<TestCase> &aTestCases, std::string &sError)
+bool ReadTestCases(const std::filesystem::path &sCasesPath, std::vector<TestCase> &aTestCases, std::string &sError)
 {
-    std::error_code sFilesystemError;
-    if (!std::filesystem::is_directory(sCasesDirectory, sFilesystemError))
+    std::error_code                    sFilesystemError;
+    std::vector<std::filesystem::path> aCasePaths;
+    if (std::filesystem::is_regular_file(sCasesPath, sFilesystemError))
     {
-        sError = sFilesystemError ? "could not read test-case directory " + sCasesDirectory.string() + ": " +
-                                        sFilesystemError.message()
-                                  : "test-case path is not a directory: " + sCasesDirectory.string();
-        return false;
+        aCasePaths.push_back(sCasesPath);
     }
-
-    std::vector<std::filesystem::path>                  aCasePaths;
-    std::filesystem::recursive_directory_iterator       sIterator(sCasesDirectory, sFilesystemError);
-    const std::filesystem::recursive_directory_iterator sEnd;
-    while (!sFilesystemError && sIterator != sEnd)
+    else if (!sFilesystemError && std::filesystem::is_directory(sCasesPath, sFilesystemError))
     {
-        const bool bIsRegularFile = sIterator->is_regular_file(sFilesystemError);
+        std::filesystem::recursive_directory_iterator       sIterator(sCasesPath, sFilesystemError);
+        const std::filesystem::recursive_directory_iterator sEnd;
+        while (!sFilesystemError && sIterator != sEnd)
+        {
+            const bool bIsRegularFile = sIterator->is_regular_file(sFilesystemError);
+            if (sFilesystemError)
+            {
+                break;
+            }
+            if (bIsRegularFile && sIterator->path().extension() == ".json")
+            {
+                aCasePaths.push_back(sIterator->path());
+            }
+            sIterator.increment(sFilesystemError);
+        }
         if (sFilesystemError)
         {
-            break;
+            sError =
+                "could not enumerate test-case directory " + sCasesPath.string() + ": " + sFilesystemError.message();
+            return false;
         }
-        if (bIsRegularFile && sIterator->path().extension() == ".json")
-        {
-            aCasePaths.push_back(sIterator->path());
-        }
-        sIterator.increment(sFilesystemError);
     }
-    if (sFilesystemError)
+    else
     {
-        sError =
-            "could not enumerate test-case directory " + sCasesDirectory.string() + ": " + sFilesystemError.message();
+        sError = "test-case path is not a file or directory: " + sCasesPath.string();
+        if (sFilesystemError)
+            sError += ": " + sFilesystemError.message();
         return false;
     }
     std::sort(
@@ -84,7 +92,7 @@ bool ReadTestCases(const std::filesystem::path &sCasesDirectory, std::vector<Tes
         { return sLeft.generic_string() < sRight.generic_string(); });
     if (aCasePaths.empty())
     {
-        sError = "no JSON test-case files were found under " + sCasesDirectory.string();
+        sError = "no JSON test-case files were found under " + sCasesPath.string();
         return false;
     }
 
@@ -113,10 +121,27 @@ bool ReadTestCases(const std::filesystem::path &sCasesDirectory, std::vector<Tes
 
 int main(int nArgumentCount, char *aArguments[])
 {
-    if (nArgumentCount != 3)
+    bool          bVisible          = false;
+    std::uint32_t nWaitMilliseconds = 0;
+    bool          bValidArguments   = nArgumentCount >= 3;
+    for (int nIndex = 3; bValidArguments && nIndex < nArgumentCount; ++nIndex)
     {
-        std::cerr << "Usage: VimMotionsTests.exe <test-cases-directory> "
-                     "<report-directory>\n";
+        const std::string sArgument = aArguments[nIndex];
+        if (sArgument == "--visible")
+            bVisible = true;
+        else if (sArgument == "--wait-ms" && nIndex + 1 < nArgumentCount)
+        {
+            const std::string sWait   = aArguments[++nIndex];
+            const auto        sParsed = std::from_chars(sWait.data(), sWait.data() + sWait.size(), nWaitMilliseconds);
+            bValidArguments = !sWait.empty() && sParsed.ec == std::errc{} && sParsed.ptr == sWait.data() + sWait.size();
+        }
+        else
+            bValidArguments = false;
+    }
+    if (!bValidArguments)
+    {
+        std::cerr << "Usage: VimMotionsTests.exe <test-case-file-or-directory> "
+                     "<report-directory> [--visible] [--wait-ms <milliseconds>]\n";
         return 2;
     }
 
@@ -134,7 +159,7 @@ int main(int nArgumentCount, char *aArguments[])
     }
 
     std::vector<TestResult> aResults;
-    if (!RunFunctionalTests(aTestCases, aResults, sError))
+    if (!RunFunctionalTests(aTestCases, aResults, sError, bVisible, nWaitMilliseconds))
     {
         std::cerr << "Test setup failed: " << sError << '\n';
         return 2;

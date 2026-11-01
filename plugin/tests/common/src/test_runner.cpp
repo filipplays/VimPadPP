@@ -98,7 +98,7 @@ class EditorHarness
   public:
     ~EditorHarness() { Shutdown(); }
 
-    bool Initialize(std::string &sError)
+    bool Initialize(std::string &sError, bool bVisible)
     {
         m_hScintillaModule = LoadLibraryW(L"Scintilla.dll");
         if (m_hScintillaModule == nullptr)
@@ -120,15 +120,16 @@ class EditorHarness
         }
 
         m_hParent = CreateWindowExW(
-            0, kClassName, L"VimMotions Functional Tests", WS_OVERLAPPED, 0, 0, 100, 100, nullptr, nullptr,
-            sWindowClass.hInstance, nullptr);
+            0, kClassName, L"VimMotions Functional Tests", WS_OVERLAPPED, 0, 0, bVisible ? 800 : 100,
+            bVisible ? 600 : 100, nullptr, nullptr, sWindowClass.hInstance, nullptr);
         if (m_hParent == nullptr)
         {
             sError = "could not create the test host window";
             return false;
         }
         m_hEditor = CreateWindowExW(
-            0, L"Scintilla", L"", WS_CHILD, 0, 0, 100, 100, m_hParent, nullptr, sWindowClass.hInstance, nullptr);
+            0, L"Scintilla", L"", WS_CHILD, 0, 0, bVisible ? 800 : 100, bVisible ? 600 : 100, m_hParent, nullptr,
+            sWindowClass.hInstance, nullptr);
         if (m_hEditor == nullptr)
         {
             sError = "could not create the Scintilla test control";
@@ -152,6 +153,13 @@ class EditorHarness
             return false;
         }
         m_bInstalled = true;
+        m_bVisible   = bVisible;
+        if (bVisible)
+        {
+            ShowWindow(m_hEditor, SW_SHOW);
+            ShowWindow(m_hParent, SW_SHOW);
+            UpdateWindow(m_hParent);
+        }
         return true;
     }
 
@@ -167,6 +175,10 @@ class EditorHarness
         SendMessageW(m_hEditor, WM_KEYDOWN, VK_ESCAPE, 0);
         SendMessageW(m_hEditor, SCI_SETTEXT, 0, reinterpret_cast<LPARAM>(sTestCase.sInitialText.c_str()));
         SendMessageW(m_hEditor, Scintilla::GOTOPOS, sTestCase.nInitialCaret, 0);
+        if (m_bVisible)
+        {
+            UpdateWindow(m_hEditor);
+        }
         if (sTestCase.nInitialCaret < 0 ||
             sTestCase.nInitialCaret > SendMessageW(m_hEditor, Scintilla::GETLENGTH, 0, 0))
         {
@@ -195,6 +207,10 @@ class EditorHarness
             {
                 sError = "unsupported key token: " + sKey;
                 return false;
+            }
+            if (m_bVisible)
+            {
+                UpdateWindow(m_hEditor);
             }
         }
         return true;
@@ -243,9 +259,28 @@ class EditorHarness
     InstallVimFn   m_pInstallVim       = nullptr;
     UninstallVimFn m_pUninstallVim     = nullptr;
     bool           m_bInstalled        = false;
+    bool           m_bVisible          = false;
 };
 
-TestResult RunTest(const TestCase &sTestCase, const EditorHarness &sHarness)
+void WaitForMessages(std::uint32_t nWaitMilliseconds)
+{
+    const auto sDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(nWaitMilliseconds);
+    while (std::chrono::steady_clock::now() < sDeadline)
+    {
+        MSG sMessage{};
+        while (std::chrono::steady_clock::now() < sDeadline && PeekMessageW(&sMessage, nullptr, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&sMessage);
+            DispatchMessageW(&sMessage);
+        }
+        const auto nRemaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(sDeadline - std::chrono::steady_clock::now()).count();
+        if (nRemaining > 0)
+            MsgWaitForMultipleObjects(0, nullptr, FALSE, static_cast<DWORD>(nRemaining), QS_ALLINPUT);
+    }
+}
+
+TestResult RunTest(const TestCase &sTestCase, const EditorHarness &sHarness, std::uint32_t nWaitMilliseconds)
 {
     TestResult sResult;
     sResult.pTestCase = &sTestCase;
@@ -256,6 +291,7 @@ TestResult RunTest(const TestCase &sTestCase, const EditorHarness &sHarness)
             std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - nStart).count();
         return sResult;
     }
+    WaitForMessages(nWaitMilliseconds);
     sResult.sActualText  = sHarness.ReadText();
     sResult.nActualCaret = sHarness.ReadCaret();
     sResult.bPassed =
@@ -266,10 +302,12 @@ TestResult RunTest(const TestCase &sTestCase, const EditorHarness &sHarness)
 }
 } // namespace
 
-bool RunFunctionalTests(const std::vector<TestCase> &aTestCases, std::vector<TestResult> &aResults, std::string &sError)
+bool RunFunctionalTests(
+    const std::vector<TestCase> &aTestCases, std::vector<TestResult> &aResults, std::string &sError, bool bVisible,
+    std::uint32_t nWaitMilliseconds)
 {
     EditorHarness sHarness;
-    if (!sHarness.Initialize(sError))
+    if (!sHarness.Initialize(sError, bVisible))
     {
         return false;
     }
@@ -278,7 +316,7 @@ bool RunFunctionalTests(const std::vector<TestCase> &aTestCases, std::vector<Tes
     aResults.reserve(aTestCases.size());
     for (const TestCase &sTestCase : aTestCases)
     {
-        aResults.push_back(RunTest(sTestCase, sHarness));
+        aResults.push_back(RunTest(sTestCase, sHarness, nWaitMilliseconds));
     }
     return true;
 }

@@ -32,10 +32,10 @@ BOOL Backend_NATIVE::bHandle_input(HWND, UINT nMessage, WPARAM wParam, LPARAM, U
     return FALSE;
 }
 
-BOOL Backend_NATIVE::Install(HWND hScintillaWindow)
+BOOL Backend_NATIVE::Install()
 {
-    m_pEngine = std::make_unique<VimEngine>(hScintillaWindow);
+    m_pEngine = std::make_unique<VimEngine>(m_hWindow);
     return TRUE;
 }
 
-BOOL Backend_NATIVE::Uninstall(HWND) { return TRUE; }
+BOOL Backend_NATIVE::Uninstall() { return TRUE; }
