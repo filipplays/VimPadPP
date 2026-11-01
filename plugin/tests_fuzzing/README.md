@@ -4,20 +4,20 @@ The fuzz runner generates editor scenarios and compares the standalone Vim integ
 
 ## Running
 
-From the project root:
+From the `plugin/` directory:
 
 ```sh
 make fuzz
 make fuzz-seed SEED=42
 ```
 
-These targets build the Windows test executable and runtime DLLs, then run the Python driver. They require Python 3, Neovim, Wine, and the MinGW x86-64 C++ compiler. The current Makefile also expects `wscite/Scintilla.dll`, which is absent from this checkout; supply a compatible Windows x64 DLL at that path first.
+These targets build the Windows test executable and runtime DLLs, then run the Python driver. They require Python 3, Neovim, Wine, and the MinGW x86-64 C++ compiler. The Makefile expects a compatible Windows x64 DLL at `dependencies/scintilla/Scintilla.dll`. See the [Makefile commands](../makefile-commands.md#fuzzing-and-replay) for backend-specific targets.
 
 The default seed is `1` and the default run generates 20 texts. To choose the number of texts or executable paths, run the driver directly after building:
 
 ```sh
 python3 tests_fuzzing/differential/run_fuzz.py \
-  --seed 42 --texts 50 --test-exe build/windows-x64/VimMotionsTests.exe
+  --seed 42 --texts 50 --test-exe build/windows-x64/both/VimMotionsTests.exe
 ```
 
 Use `--nvim` and `--wine` to specify executable paths when they are not on `PATH`.

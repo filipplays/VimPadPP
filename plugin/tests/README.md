@@ -8,7 +8,7 @@ check the result.
 
 ## Running the suite
 
-From the project root, run:
+From the `plugin/` directory, run:
 
 ```sh
 make test
@@ -19,15 +19,16 @@ without executing tests. `make test` runs the executable through Wine from the
 build directory, so `Scintilla.dll` and `VimMotions.dll` are found next to the
 test executable.
 
-The runner recursively loads every JSON file under `tests/cases/` in stable
-path order, while preserving the case order inside each file. The resulting
-test order is deliberately deterministic.
+By default, the runner recursively loads every JSON file under `tests/cases/`
+in stable path order, while preserving the case order inside each file. Set
+`TEST_PATH` to select a file or another directory. See the
+[Makefile commands](../makefile-commands.md#functional-tests) for backend,
+wait, visibility, and report options.
 
-The current Makefile expects `wscite/Scintilla.dll` from the old Scintilla
-project, but this checkout does not contain that directory. Supply a compatible
-Windows x64 Scintilla DLL at that path before using these targets. The build
-also requires the MinGW x86-64 C++ compiler and Python 3; running it requires
-Wine. `make test` formats the JSON fixtures before building.
+The Makefile expects a compatible Windows x64 Scintilla DLL at
+`dependencies/scintilla/Scintilla.dll`. The build also requires the MinGW
+x86-64 C++ compiler and Python 3; running it requires Wine. `make test` formats
+all JSON fixtures under `tests/cases/` before building.
 
 ## Test cases
 
@@ -87,16 +88,17 @@ exercise the Notepad++ plugin lifecycle.
   cases from a directory, invokes the runner, and writes reports.
 - `tests/cases/` contains the ordered fixtures.
 
-The executable accepts two arguments when run directly:
+The executable accepts a file or directory and a report directory, followed by
+optional visibility and wait arguments:
 
 ```text
-VimMotionsTests.exe <test-cases-directory> <report-directory>
+VimMotionsTests.exe <test-case-file-or-directory> <report-directory> [--visible] [--wait-ms <milliseconds>]
 ```
 
 ## Reports and exit codes
 
 Each `make test` run writes these generated files under
-`build/windows-x64/test-results/`:
+`tests/functional/tmp/reports/` by default:
 
 - `functional-report.txt` is the human-readable summary and diagnostics.
 - `functional-report.json` is the machine-readable result artifact.
