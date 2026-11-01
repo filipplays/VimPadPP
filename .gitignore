@@ -3,5 +3,5 @@ obsidian
 planning
 plugin/build
 plugin/NEOVIM_PROTOTYPE.md
-plugin/dependencies/**
+plugin/dependencies/
 **/__pycache__/
