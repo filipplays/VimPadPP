@@ -9,6 +9,7 @@ class Manager
     BOOL InstallVim(HWND hWindow);
     BOOL UninstallVim(HWND hWindow);
     BOOL NotifyCaretMoved(HWND hWindow, LRESULT nPosition);
+    void SetSaveHandler(void (*pHandler)(HWND)) { m_pSaveHandler = pHandler; }
 
   private:
 #if !defined(ENABLE_NATIVE_BACKEND)
@@ -19,4 +20,5 @@ class Manager
     static LRESULT CALLBACK
     VimSubclassProc(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR nId, DWORD_PTR nData);
     std::unordered_map<HWND, std::unique_ptr<Backend>> m_aSessions;
+    void (*m_pSaveHandler)(HWND) = nullptr;
 };

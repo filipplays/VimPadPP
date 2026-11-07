@@ -44,7 +44,7 @@ BOOL Manager::InstallVim(HWND hWindow)
 #if defined(ENABLE_NATIVE_BACKEND)
     auto pSession = std::make_unique<Backend_NATIVE>(hWindow);
 #else
-    auto pSession = std::make_unique<Backend_NVIM>(hWindow);
+    auto pSession = std::make_unique<Backend_NVIM>(hWindow, m_pSaveHandler);
 #endif
     if (!pSession->Install())
         return FALSE;

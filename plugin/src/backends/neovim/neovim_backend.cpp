@@ -26,6 +26,9 @@ void Backend_NVIM::StopNeovimProcess()
     if (m_sSession.nTimer)
         KillTimer(m_hWindow, m_sSession.nTimer);
     m_sSession.nTimer = 0;
+    if (m_hCommandBar)
+        DestroyWindow(m_hCommandBar);
+    m_hCommandBar = nullptr;
     CloseHandleAndReset(m_sSession.hInput);
     if (m_sSession.hProcess)
     {
@@ -129,7 +132,50 @@ bool Backend_NVIM::DecodeMsgPackValue(Value &sValue, int nDepth)
         return true;
     else if (nTag == 0xc2 || nTag == 0xc3)
     {
+        sValue.nType    = 4;
+        sValue.nInteger = nTag == 0xc3;
+        return true;
+    }
+    else if ((nTag & 0xf0) == 0x80 || nTag == 0xde || nTag == 0xdf)
+    {
         sValue.nType = 4;
+        if ((nTag & 0xf0) == 0x80)
+            nLength = nTag & 15;
+        else if (!ReadBigEndianInteger(nTag == 0xde ? 2 : 4, nLength))
+            return false;
+        if (nLength > 1024 * 1024)
+            return false;
+        for (uint64_t nIndex = 0; nIndex < nLength * 2; ++nIndex)
+        {
+            Value sItem;
+            if (!DecodeMsgPackValue(sItem, nDepth + 1))
+                return false;
+        }
+        return true;
+    }
+    else if (nTag == 0xca || nTag == 0xcb || (nTag >= 0xd4 && nTag <= 0xd8) || (nTag >= 0xc7 && nTag <= 0xc9))
+    {
+        sValue.nType = 4;
+        if (nTag == 0xca || nTag == 0xcb)
+            nLength = nTag == 0xca ? 4 : 8;
+        else
+        {
+            if (nTag >= 0xd4)
+                nLength = uint64_t{1} << (nTag - 0xd4);
+            else if (!ReadBigEndianInteger(nTag == 0xc7 ? 1 : nTag == 0xc8 ? 2 : 4, nLength))
+                return false;
+            ++nLength; // Extension type byte.
+        }
+        if (nLength > 16 * 1024 * 1024)
+            return false;
+        char aBytes[256];
+        while (nLength)
+        {
+            size_t nChunk = static_cast<size_t>(std::min<uint64_t>(nLength, sizeof(aBytes)));
+            if (!ReadBytes(aBytes, nChunk))
+                return false;
+            nLength -= nChunk;
+        }
         return true;
     }
     else if (nTag >= 0xcc && nTag <= 0xcf)
@@ -214,11 +260,125 @@ bool Backend_NVIM::CallRpcAndWait(const std::string &sMethod, const std::string 
     unsigned nId = 0;
     if (!SendRpc(sMethod, sArguments, nId))
         return false;
-    Value sResponse;
-    if (!DecodeMsgPackValue(sResponse) || sResponse.nType != 3 || sResponse.aItems.size() != 4 ||
-        sResponse.aItems[0].nInteger != 1 || sResponse.aItems[1].nInteger != nId || sResponse.aItems[2].nType != 0)
+    for (;;)
+    {
+        Value sResponse;
+        if (!DecodeMsgPackValue(sResponse) || sResponse.nType != 3 || sResponse.aItems.empty())
+            return false;
+        if (sResponse.aItems[0].nInteger == 2)
+        {
+            if (!HandleNotification(sResponse))
+                return false;
+            continue;
+        }
+        if (sResponse.aItems.size() != 4 || sResponse.aItems[0].nInteger != 1 || sResponse.aItems[1].nInteger != nId ||
+            sResponse.aItems[2].nType != 0)
+            return false;
+        sResult = std::move(sResponse.aItems[3]);
+        return true;
+    }
+}
+bool Backend_NVIM::AttachUi()
+{
+    std::string sArgs;
+    AppendMsgPackArrayHeader(sArgs, 3);
+    AppendMsgPackInteger(sArgs, 80);
+    AppendMsgPackInteger(sArgs, 24);
+    sArgs.push_back(static_cast<char>(0x81));
+    AppendMsgPackString(sArgs, "ext_messages");
+    AppendMsgPackBoolean(sArgs, true);
+    Value sResult;
+    return CallRpcAndWait("nvim_ui_attach", sArgs, sResult);
+}
+void Backend_NVIM::PositionCommandBar()
+{
+    if (!m_hCommandBar)
+        return;
+    RECT sRect{};
+    if (GetClientRect(m_hWindow, &sRect))
+    {
+        int nHeight = 24;
+        SetWindowPos(
+            m_hCommandBar, HWND_TOP, 0, std::max(0L, sRect.bottom - nHeight), sRect.right, nHeight, SWP_NOACTIVATE);
+    }
+}
+void Backend_NVIM::UpdateCommandBar()
+{
+    if (!m_hCommandBar)
+        return;
+    std::string sText;
+    if (m_bCommandVisible)
+    {
+        size_t nPosition = std::min(m_nCommandPosition, m_sCommandText.size());
+        sText = m_sCommandPrefix + m_sCommandText.substr(0, nPosition) + "|" + m_sCommandText.substr(nPosition);
+    }
+    else
+        sText = m_sMessage;
+    if (sText.empty())
+    {
+        ShowWindow(m_hCommandBar, SW_HIDE);
+        return;
+    }
+    std::replace(sText.begin(), sText.end(), '\n', ' ');
+    int nLength = MultiByteToWideChar(CP_UTF8, 0, sText.data(), static_cast<int>(sText.size()), nullptr, 0);
+    if (nLength <= 0)
+        return;
+    std::wstring sWide(static_cast<size_t>(nLength), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, sText.data(), static_cast<int>(sText.size()), sWide.data(), nLength);
+    SetWindowTextW(m_hCommandBar, sWide.c_str());
+    PositionCommandBar();
+    ShowWindow(m_hCommandBar, SW_SHOWNOACTIVATE);
+}
+bool Backend_NVIM::HandleNotification(const Value &sNotification)
+{
+    if (sNotification.aItems.size() != 3 || sNotification.aItems[1].nType != 2 || sNotification.aItems[2].nType != 3)
         return false;
-    sResult = std::move(sResponse.aItems[3]);
+    if (sNotification.aItems[1].sString == "vim_motions_save")
+    {
+        m_sSession.bSavePending = true;
+        return true;
+    }
+    if (sNotification.aItems[1].sString != "redraw")
+        return true;
+    auto ChunksToText = [](const Value &sChunks)
+    {
+        std::string sText;
+        if (sChunks.nType == 3)
+            for (const Value &sChunk : sChunks.aItems)
+                if (sChunk.nType == 3 && sChunk.aItems.size() >= 2 && sChunk.aItems[1].nType == 2)
+                    sText += sChunk.aItems[1].sString;
+        return sText;
+    };
+    for (const Value &sEvent : sNotification.aItems[2].aItems)
+    {
+        if (sEvent.nType != 3 || sEvent.aItems.empty() || sEvent.aItems[0].nType != 2)
+            continue;
+        const std::string &sName = sEvent.aItems[0].sString;
+        for (size_t nIndex = 1; nIndex < sEvent.aItems.size(); ++nIndex)
+        {
+            const Value &sArgs = sEvent.aItems[nIndex];
+            if (sArgs.nType != 3)
+                continue;
+            if (sName == "cmdline_show" && sArgs.aItems.size() >= 4 && sArgs.aItems[1].nType == 1 &&
+                sArgs.aItems[2].nType == 2 && sArgs.aItems[3].nType == 2)
+            {
+                m_sCommandText     = ChunksToText(sArgs.aItems[0]);
+                m_nCommandPosition = static_cast<size_t>(std::max<int64_t>(0, sArgs.aItems[1].nInteger));
+                m_sCommandPrefix   = sArgs.aItems[2].sString + sArgs.aItems[3].sString;
+                m_bCommandVisible  = true;
+            }
+            else if (sName == "cmdline_pos" && !sArgs.aItems.empty() && sArgs.aItems[0].nType == 1)
+                m_nCommandPosition = static_cast<size_t>(std::max<int64_t>(0, sArgs.aItems[0].nInteger));
+            else if (sName == "cmdline_hide")
+                m_bCommandVisible = false;
+            else if (sName == "msg_show" && sArgs.aItems.size() >= 2)
+                m_sMessage = ChunksToText(sArgs.aItems[1]);
+            else if (sName == "msg_clear")
+                m_sMessage.clear();
+            else if (sName == "flush")
+                UpdateCommandBar();
+        }
+    }
     return true;
 }
 std::string Backend_NVIM::BuildStateArguments()
@@ -398,7 +558,8 @@ bool Backend_NVIM::StartNeovimProcess()
     size_t       nSlash = sPath.find_last_of(L"\\/");
     if (nSlash == std::wstring::npos)
         return false;
-    sPath = sPath.substr(0, nSlash) + L"\\neovim\\bin\\nvim.exe";
+    std::wstring sNeovimDir = sPath.substr(0, nSlash) + L"\\neovim";
+    sPath                   = sNeovimDir + L"\\bin\\nvim.exe";
     SECURITY_ATTRIBUTES sSecurity{sizeof(sSecurity), nullptr, TRUE};
     HANDLE              hChildInput = nullptr, hChildOutput = nullptr;
     if (!CreatePipe(&hChildInput, &m_sSession.hInput, &sSecurity, 0) ||
@@ -417,7 +578,7 @@ bool Backend_NVIM::StartNeovimProcess()
     sStartup.hStdOutput = hChildOutput;
     sStartup.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION sProcess{};
-    std::wstring        sCommand = L"\"" + sPath + L"\" --embed --headless -u NONE -i NONE -n";
+    std::wstring sCommand = L"\"" + sPath + L"\" --embed -u \"" + sNeovimDir + L"\\vim-motions-init.lua\" -i NONE -n";
 
     BOOL bStarted = CreateProcessW(
         sPath.c_str(), sCommand.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &sStartup,
@@ -577,6 +738,12 @@ bool Backend_NVIM::PollResponses()
         if (!bComplete)
             break;
         m_sSession.sIncoming.erase(0, m_sSession.nReadOffset);
+        if (sResponse.nType == 3 && !sResponse.aItems.empty() && sResponse.aItems[0].nInteger == 2)
+        {
+            if (!HandleNotification(sResponse))
+                return false;
+            continue;
+        }
         if (sResponse.nType != 3 || sResponse.aItems.size() != 4 || sResponse.aItems[0].nInteger != 1 ||
             sResponse.aItems[2].nType != 0)
             return false;
@@ -609,16 +776,20 @@ bool Backend_NVIM::PollResponses()
         }
         else if (!SyncDocument(sResponse.aItems[3]))
             return false;
-    }
-    if (!m_sSession.nStateId && !m_sSession.nCaretId)
-    {
-        KillTimer(m_hWindow, m_sSession.nTimer);
-        m_sSession.nTimer = 0;
+        else if (m_sSession.bSavePending && !m_sSession.nCaretId && m_sSession.aPendingKeys.empty())
+        {
+            m_sSession.bSavePending = false;
+            if (m_pSaveHandler && m_sEditor.Send(Scintilla::GETDOCPOINTER) == m_sSession.nDocument &&
+                GetEditorText() == m_sSession.sText)
+                m_pSaveHandler(m_hWindow);
+        }
     }
     return true;
 }
 BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM, UINT_PTR, DWORD_PTR)
 {
+    if (nMessage == WM_SIZE)
+        PositionCommandBar();
     if (nMessage == WM_TIMER && wParam == m_sSession.nTimer && m_sSession.nTimer)
     {
         if (!PollResponses())
@@ -814,6 +985,45 @@ BOOL Backend_NVIM::Install()
         SetLastError(ERROR_PROCESS_ABORTED);
         return FALSE;
     }
+    m_hCommandBar = CreateWindowExW(
+        0, L"STATIC", L"", WS_CHILD | WS_BORDER | SS_LEFT | SS_NOPREFIX, 0, 0, 0, 0, m_hWindow, nullptr,
+        GetModuleHandleW(nullptr), nullptr);
+    if (!m_hCommandBar)
+    {
+        StopAndReportError(L"Could not create the Neovim command bar.");
+        return FALSE;
+    }
+    SendMessageW(m_hCommandBar, WM_SETFONT, SendMessageW(m_hWindow, WM_GETFONT, 0, 0), FALSE);
+    if (!AttachUi())
+    {
+        StopAndReportError(
+            L"Could not attach the Neovim user interface. Check your config and that neovim\\vim-motions-init.lua "
+            L"exists. Startup may have timed out.");
+        return FALSE;
+    }
+    std::string sArgs;
+    AppendMsgPackArrayHeader(sArgs, 1);
+    AppendMsgPackString(sArgs, "get(g:, 'vim_motions_startup_error', 'Plugin startup script did not run')");
+    Value sStartupError;
+    if (!CallRpcAndWait("nvim_eval", sArgs, sStartupError) || sStartupError.nType != 2)
+    {
+        StopAndReportError(L"Could not check Neovim startup. Check your config for errors or a startup timeout.");
+        return FALSE;
+    }
+    if (!sStartupError.sString.empty())
+    {
+        int          nSize    = MultiByteToWideChar(CP_UTF8, 0, sStartupError.sString.c_str(), -1, nullptr, 0);
+        std::wstring sMessage = L"Neovim configuration failed:\n\n";
+        if (nSize > 0)
+        {
+            std::wstring sDetail(static_cast<size_t>(nSize), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, sStartupError.sString.c_str(), -1, sDetail.data(), nSize);
+            sDetail.pop_back();
+            sMessage += sDetail;
+        }
+        StopAndReportError(sMessage.c_str());
+        return FALSE;
+    }
     LRESULT nPosition      = m_sEditor.Caret();
     m_sSession.nKnownCaret = nPosition;
     LRESULT nLine          = m_sEditor.Send(Scintilla::LINEFROMPOSITION, nPosition);
@@ -826,6 +1036,12 @@ BOOL Backend_NVIM::Install()
     }
     (void)m_sEditor.Send(Scintilla::SETCARETSTYLE, Scintilla::CARETSTYLE_BLOCK);
     (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, 0);
+    if (!SetTimer(m_hWindow, NeovimResponseTimerId, 10, nullptr))
+    {
+        StopAndReportError(L"Could not start the Neovim response timer.");
+        return FALSE;
+    }
+    m_sSession.nTimer = NeovimResponseTimerId;
     return TRUE;
 }
 BOOL Backend_NVIM::Uninstall()

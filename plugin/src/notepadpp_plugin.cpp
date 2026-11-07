@@ -3,6 +3,8 @@
 // #include "VimMotions.h"
 
 #include <commctrl.h>
+#include <shellapi.h>
+#include <string>
 
 // Minimal Notepad++ plugin ABI. See the official PluginInterface.h.
 struct NppData
@@ -25,25 +27,186 @@ struct SCNotification;
 
 namespace
 {
-constexpr UINT NPPN_READY    = 1001;
-constexpr UINT NPPN_SHUTDOWN = 1009;
-constexpr UINT SCN_UPDATEUI  = 2007;
+constexpr UINT NPPN_READY               = 1001;
+constexpr UINT NPPN_SHUTDOWN            = 1009;
+constexpr UINT SCN_UPDATEUI             = 2007;
+constexpr UINT NPPM_DOOPEN              = WM_USER + 1000 + 77;
+constexpr UINT NPPM_SETMENUITEMCHECK    = WM_USER + 1000 + 40;
+constexpr UINT NPPM_GETCURRENTSCINTILLA = WM_USER + 1000 + 4;
+constexpr UINT NPPM_SAVECURRENTFILE     = WM_USER + 1000 + 38;
 NppData        g_sNpp{};
 Manager        g_xManager;
+bool           g_bEnabled = false;
 
-void AttachViews()
+void UpdateToggleMenu();
+
+#if !defined(ENABLE_NATIVE_BACKEND)
+void SaveView(HWND hWindow)
 {
-    g_xManager.InstallVim(g_sNpp.hMainScintilla);
-    g_xManager.InstallVim(g_sNpp.hSecondScintilla);
+    int nCurrentView = -1;
+    SendMessageW(g_sNpp.hNotepad, NPPM_GETCURRENTSCINTILLA, 0, reinterpret_cast<LPARAM>(&nCurrentView));
+    HWND hCurrentView = nCurrentView == 0   ? g_sNpp.hMainScintilla
+                        : nCurrentView == 1 ? g_sNpp.hSecondScintilla
+                                            : nullptr;
+    if (hCurrentView != hWindow)
+    {
+        MessageBoxW(
+            g_sNpp.hNotepad, L"Could not save: the active editor view changed.", L"VIM Motions", MB_OK | MB_ICONERROR);
+        return;
+    }
+    SendMessageW(g_sNpp.hNotepad, NPPM_SAVECURRENTFILE, 0, 0);
 }
+#endif
+
+bool InstallViews()
+{
+#if !defined(ENABLE_NATIVE_BACKEND)
+    g_xManager.SetSaveHandler(SaveView);
+#endif
+    BOOL bMainInstalled   = g_xManager.InstallVim(g_sNpp.hMainScintilla);
+    BOOL bSecondInstalled = g_xManager.InstallVim(g_sNpp.hSecondScintilla);
+    if (!bMainInstalled || !bSecondInstalled)
+    {
+        if (bMainInstalled)
+            g_xManager.UninstallVim(g_sNpp.hMainScintilla);
+        if (bSecondInstalled)
+            g_xManager.UninstallVim(g_sNpp.hSecondScintilla);
+    }
+    g_bEnabled = bMainInstalled && bSecondInstalled;
+    UpdateToggleMenu();
+    return g_bEnabled;
+}
+
+void AttachViews() { InstallViews(); }
 
 void DetachViews()
 {
     g_xManager.UninstallVim(g_sNpp.hMainScintilla);
     g_xManager.UninstallVim(g_sNpp.hSecondScintilla);
+    g_bEnabled = false;
+    UpdateToggleMenu();
 }
 
-FuncItem g_aFunctions[] = {{L"Enable Vim motions", AttachViews, 0, false, nullptr}};
+void ToggleViews()
+{
+    if (g_bEnabled)
+        DetachViews();
+    else
+        AttachViews();
+}
+
+#if !defined(ENABLE_NATIVE_BACKEND)
+void ModuleAnchor() {}
+
+std::wstring ConfigDirectory()
+{
+    HMODULE hModule = nullptr;
+    if (!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&ModuleAnchor), &hModule))
+        return {};
+    wchar_t aPath[32768];
+    DWORD   nLength = GetModuleFileNameW(hModule, aPath, 32768);
+    if (!nLength || nLength == 32768)
+        return {};
+    std::wstring sPath(aPath, nLength);
+    size_t       nSlash = sPath.find_last_of(L"\\/");
+    return nSlash == std::wstring::npos ? std::wstring{} : sPath.substr(0, nSlash) + L"\\config";
+}
+
+bool EnsureConfigDirectory(const std::wstring &sDirectory)
+{
+    if (sDirectory.empty())
+        return false;
+    if (CreateDirectoryW(sDirectory.c_str(), nullptr))
+        return true;
+    DWORD nAttributes = GetFileAttributesW(sDirectory.c_str());
+    return nAttributes != INVALID_FILE_ATTRIBUTES && (nAttributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+void OpenConfigFolder()
+{
+    std::wstring sDirectory = ConfigDirectory();
+    if (!EnsureConfigDirectory(sDirectory) ||
+        reinterpret_cast<INT_PTR>(
+            ShellExecuteW(g_sNpp.hNotepad, L"open", sDirectory.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32)
+        MessageBoxW(
+            g_sNpp.hNotepad, (L"Could not create or open the config folder:\n" + sDirectory).c_str(), L"VIM Motions",
+            MB_OK | MB_ICONERROR);
+}
+
+void OpenConfig()
+{
+    std::wstring sDirectory = ConfigDirectory();
+    if (!EnsureConfigDirectory(sDirectory))
+    {
+        MessageBoxW(
+            g_sNpp.hNotepad, (L"Could not create the config folder:\n" + sDirectory).c_str(), L"VIM Motions",
+            MB_OK | MB_ICONERROR);
+        return;
+    }
+    std::wstring sLua = sDirectory + L"\\init.lua";
+    std::wstring sVim = sDirectory + L"\\init.vim";
+    bool         bLua = GetFileAttributesW(sLua.c_str()) != INVALID_FILE_ATTRIBUTES;
+    bool         bVim = GetFileAttributesW(sVim.c_str()) != INVALID_FILE_ATTRIBUTES;
+    if (bLua && bVim)
+    {
+        MessageBoxW(
+            g_sNpp.hNotepad, L"Both init.lua and init.vim exist. Remove or rename one before reloading.",
+            L"VIM Motions", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (!bLua && !bVim)
+    {
+        HANDLE hFile = CreateFileW(sLua.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE)
+        {
+            MessageBoxW(g_sNpp.hNotepad, (L"Could not create " + sLua).c_str(), L"VIM Motions", MB_OK | MB_ICONERROR);
+            return;
+        }
+        const char aStarter[] = "-- Add your Neovim settings and mappings here.\r\n";
+        DWORD      nWritten   = 0;
+        bool       bWritten =
+            WriteFile(hFile, aStarter, sizeof(aStarter) - 1, &nWritten, nullptr) && nWritten == sizeof(aStarter) - 1;
+        CloseHandle(hFile);
+        if (!bWritten)
+        {
+            MessageBoxW(g_sNpp.hNotepad, L"Could not write the starter config.", L"VIM Motions", MB_OK | MB_ICONERROR);
+            return;
+        }
+    }
+    const std::wstring &sFile = bVim ? sVim : sLua;
+    if (!SendMessageW(g_sNpp.hNotepad, NPPM_DOOPEN, 0, reinterpret_cast<LPARAM>(sFile.c_str())))
+        MessageBoxW(g_sNpp.hNotepad, (L"Could not open " + sFile).c_str(), L"VIM Motions", MB_OK | MB_ICONERROR);
+}
+
+void ReloadConfig()
+{
+    bool bWasEnabled = g_bEnabled;
+    DetachViews();
+    bool bLoaded = InstallViews();
+    if (bLoaded && !bWasEnabled)
+        DetachViews();
+    if (bLoaded)
+        MessageBoxW(
+            g_sNpp.hNotepad, L"Neovim configuration reloaded successfully.", L"VIM Motions",
+            MB_OK | MB_ICONINFORMATION);
+}
+#endif
+
+FuncItem g_aFunctions[] = {
+    {L"Enable Vim motions", ToggleViews, 0, false, nullptr},
+#if !defined(ENABLE_NATIVE_BACKEND)
+    {L"Open Neovim config", OpenConfig, 0, false, nullptr},
+    {L"Open Neovim config folder", OpenConfigFolder, 0, false, nullptr},
+    {L"Reload Neovim config", ReloadConfig, 0, false, nullptr},
+#endif
+};
+
+void UpdateToggleMenu()
+{
+    SendMessageW(g_sNpp.hNotepad, NPPM_SETMENUITEMCHECK, g_aFunctions[0].nCommandId, g_bEnabled);
+}
 } // namespace
 
 extern "C" __declspec(dllexport) void setInfo(NppData sData) { g_sNpp = sData; }

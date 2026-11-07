@@ -123,7 +123,7 @@ $(NVIM_DLL): $(CORE_SOURCES_NEOVIM) $(CORE_HEADERS) | $(NVIM_BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -DVIM_MOTIONS_BUILD -shared $(CORE_SOURCES_NEOVIM) -o $@ -lcomctl32 $(RUNTIME_LDFLAGS)
 
 $(NVIM_PLUGIN_DLL): src/notepadpp_plugin.cpp $(CORE_SOURCES_NEOVIM) $(CORE_HEADERS) | $(NVIM_BUILD_DIR)
-	$(CXX) $(CXXFLAGS) -DVIM_MOTIONS_BUILD -shared src/notepadpp_plugin.cpp $(CORE_SOURCES_NEOVIM) -o $@ -lcomctl32 $(RUNTIME_LDFLAGS)
+	$(CXX) $(CXXFLAGS) -DVIM_MOTIONS_BUILD -shared src/notepadpp_plugin.cpp $(CORE_SOURCES_NEOVIM) -o $@ -lcomctl32 -lshell32 $(RUNTIME_LDFLAGS)
 
 # Neovim backend: build and install.
 # Targeting notepad
@@ -138,6 +138,7 @@ stagenvim: | $(NVIM_BUILD_DIR)
 	@test -f "$(NEOVIM_DIR)/bin/nvim.exe" || (echo "Missing $(NEOVIM_DIR)/bin/nvim.exe." >&2; exit 1)
 	mkdir -p "$(NVIM_BUILD_DIR)/neovim"
 	cp -R "$(NEOVIM_DIR)/." "$(NVIM_BUILD_DIR)/neovim/"
+	cp src/neovim_init.lua "$(NVIM_BUILD_DIR)/neovim/vim-motions-init.lua"
 
 # Shared host and Scintilla dependencies.
 $(APP): HOST_FLAGS := $(CXXFLAGS_NATIVE)

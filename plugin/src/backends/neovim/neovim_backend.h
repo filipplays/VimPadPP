@@ -11,7 +11,10 @@
 class Backend_NVIM : public Backend
 {
   public:
-    explicit Backend_NVIM(HWND hWindow) : Backend(hWindow), m_sEditor(hWindow) {}
+    explicit Backend_NVIM(HWND hWindow, void (*pSaveHandler)(HWND))
+        : Backend(hWindow), m_sEditor(hWindow), m_pSaveHandler(pSaveHandler)
+    {
+    }
     BOOL Install() override;
     BOOL Uninstall() override;
     void OnCaretMoved(LRESULT nPosition) override;
@@ -56,26 +59,38 @@ class Backend_NVIM : public Backend
         LRESULT                  nKnownCaret     = 0;
         LRESULT                  nRequestedCaret = 0;
         bool                     bApplyingState  = false;
+        bool                     bSavePending    = false;
         Mode                     eMode           = Mode::Normal;
         std::vector<std::string> aPendingKeys;
     };
     Session    m_sSession;
     EditorText m_sEditor;
-    int        m_nSuppressedChar      = -1;
-    LRESULT    m_nOriginalCaretStyle  = 0;
-    LRESULT    m_nOriginalCaretPeriod = 0;
-    void       CloseHandleAndReset(HANDLE &hHandle);
-    void       StopNeovimProcess();
-    void       AppendBigEndianBytes(std::string &sData, uint64_t nValue, int nBytes);
-    void       AppendMsgPackString(std::string &sData, const std::string &sValue);
-    bool       ReadBytes(void *pData, size_t nSize);
-    bool       ReadBigEndianInteger(int nBytes, uint64_t &nValue);
-    bool       DecodeMsgPackValue(Value &sValue, int nDepth = 0);
-    void       AppendMsgPackArrayHeader(std::string &sData, size_t nSize);
-    void       AppendMsgPackInteger(std::string &sData, int64_t nValue);
-    void       AppendMsgPackBoolean(std::string &sData, bool bValue);
+    void (*m_pSaveHandler)(HWND) = nullptr;
+    HWND        m_hCommandBar    = nullptr;
+    std::string m_sCommandPrefix;
+    std::string m_sCommandText;
+    std::string m_sMessage;
+    size_t      m_nCommandPosition     = 0;
+    bool        m_bCommandVisible      = false;
+    int         m_nSuppressedChar      = -1;
+    LRESULT     m_nOriginalCaretStyle  = 0;
+    LRESULT     m_nOriginalCaretPeriod = 0;
+    void        CloseHandleAndReset(HANDLE &hHandle);
+    void        StopNeovimProcess();
+    void        AppendBigEndianBytes(std::string &sData, uint64_t nValue, int nBytes);
+    void        AppendMsgPackString(std::string &sData, const std::string &sValue);
+    bool        ReadBytes(void *pData, size_t nSize);
+    bool        ReadBigEndianInteger(int nBytes, uint64_t &nValue);
+    bool        DecodeMsgPackValue(Value &sValue, int nDepth = 0);
+    void        AppendMsgPackArrayHeader(std::string &sData, size_t nSize);
+    void        AppendMsgPackInteger(std::string &sData, int64_t nValue);
+    void        AppendMsgPackBoolean(std::string &sData, bool bValue);
     bool SendRpc(const std::string &sMethod, const std::string &sArguments, unsigned &nId, bool bNotification = false);
     bool CallRpcAndWait(const std::string &sMethod, const std::string &sArguments, Value &sResult);
+    bool AttachUi();
+    bool HandleNotification(const Value &sNotification);
+    void UpdateCommandBar();
+    void PositionCommandBar();
     std::string BuildStateArguments();
     bool        RequestNeovimState();
     bool        SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT nColumn);
