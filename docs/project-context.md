@@ -1,8 +1,7 @@
 # Project context
 
-The current desired product name is **VimPad++**, as selected by the user on
-2026-11-08. This is a naming preference pending a rename; name availability
-has not been verified.
+The project is named **VimPad++**. Its GitHub repository uses the `VimPadPP`
+slug because GitHub repository names cannot contain `+`.
 
 The project provides Vim-style editing for Notepad++ and a standalone
 Scintilla host. It has a native Vim engine and a backend that uses a Neovim

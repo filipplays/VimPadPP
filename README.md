@@ -51,14 +51,16 @@ Notepad++ plugins directory with:
 
 ```sh
 make -C plugin installnvim \
-  NOTEPADPP_PLUGIN_DIR='/path/to/Notepad++/plugins/VIM-Motions-for-NotepadPP'
+  NOTEPADPP_PLUGIN_DIR='/path/to/Notepad++/plugins/VimPad++'
 ```
 
 The default install directory in the Makefile is specific to the original
 developer's Wine setup, so set `NOTEPADPP_PLUGIN_DIR` for your installation.
-The current DLL and plugin directory are still named
-`VIM-Motions-for-NotepadPP`; these build names have not yet been changed to
-match the VimPad++ project name.
+The plugin DLL is `VimPad++.dll` and must be inside a matching
+`plugins/VimPad++/` directory. When upgrading an earlier installation, close
+Notepad++, move any `config/` files you want to keep from the old
+`plugins/VIM-Motions-for-NotepadPP/` directory, and remove that old plugin
+directory before restarting. Otherwise Notepad++ may load both copies.
 
 The target builds the plugin DLL, stages Neovim with
 `plugin/src/neovim_init.lua`, then copies the DLL and `neovim/` directory into
@@ -79,9 +81,41 @@ optional user file from the plugin's `config/` directory: `init.lua` or
 the config, open its folder, and reload it. Configuration and plugins may
 behave differently from a normal Neovim UI; test them in this integration.
 
+For example, the following mirrors the settings in an installed
+`neovim/init.lua`. Put them in the plugin's `config/init.lua` (beside its
+`neovim/` folder) and use **Reload Neovim config** from the plugin menu. This
+keeps personal settings separate from the Neovim files copied during install:
+
+```lua
+vim.opt.hlsearch = false
+vim.opt.incsearch = false
+
+-- Leave Insert mode by typing jj or kk, and Visual mode with ii.
+vim.keymap.set('i', 'jj', '<Esc>')
+vim.keymap.set('i', 'kk', '<Esc>')
+vim.keymap.set('v', 'ii', '<Esc>')
+
+vim.opt.clipboard = 'unnamedplus'
+
+-- Paste from the system clipboard with Ctrl+V.
+vim.keymap.set({ 'n', 'v' }, '<C-v>', '"+p', { noremap = true, silent = true })
+vim.keymap.set({ 'i', 'c' }, '<C-v>', '<C-r>+', { noremap = true, silent = true })
+
+-- Save with Ctrl+S from Normal, Visual, or Insert mode.
+vim.keymap.set({ 'n', 'v' }, '<C-s>', '<cmd>w<cr>', { noremap = true, silent = true })
+vim.keymap.set('i', '<C-s>', '<Esc><cmd>w<cr>a', { noremap = true, silent = true })
+```
+
+The Ctrl+V mappings replace Neovim's usual Ctrl+V entry into Visual Block
+mode. Remove those two mappings if you use Visual Block selection. The plugin
+handles `:w` by asking Notepad++ to save the active document, so the Ctrl+S
+mappings above use the same save path.
+
 ## Known limitations
 
 - Folding does not yet behave properly in the Notepad++ integration.
+- The viewport commands `zt`, `zz`, and `zb` do not scroll the Notepad++ view
+  as they do in Neovim.
 - `:q` and related quit commands can exit the background Neovim process,
   leaving the backend unusable until it is restarted or reloaded.
 - The standalone functional harness exercises a Scintilla control, not the
@@ -91,6 +125,9 @@ behave differently from a normal Neovim UI; test them in this integration.
 - External editor changes still trigger full-text comparisons, and some
   startup or resynchronization RPC calls can block the UI while waiting for
   Neovim. Large-file behavior needs more systematic measurement.
+
+This list is not exhaustive. Some other Vim commands may also fail or behave
+differently in the plugin; not every command has been tested.
 
 ## License
 

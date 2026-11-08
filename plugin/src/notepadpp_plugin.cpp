@@ -27,16 +27,17 @@ struct SCNotification;
 
 namespace
 {
-constexpr UINT NPPN_READY               = 1001;
-constexpr UINT NPPN_SHUTDOWN            = 1009;
-constexpr UINT SCN_UPDATEUI             = 2007;
-constexpr UINT NPPM_DOOPEN              = WM_USER + 1000 + 77;
-constexpr UINT NPPM_SETMENUITEMCHECK    = WM_USER + 1000 + 40;
-constexpr UINT NPPM_GETCURRENTSCINTILLA = WM_USER + 1000 + 4;
-constexpr UINT NPPM_SAVECURRENTFILE     = WM_USER + 1000 + 38;
-NppData        g_sNpp{};
-Manager        g_xManager;
-bool           g_bEnabled = false;
+constexpr UINT    NPPN_READY               = 1001;
+constexpr UINT    NPPN_SHUTDOWN            = 1009;
+constexpr UINT    SCN_UPDATEUI             = 2007;
+constexpr UINT    NPPM_DOOPEN              = WM_USER + 1000 + 77;
+constexpr UINT    NPPM_SETMENUITEMCHECK    = WM_USER + 1000 + 40;
+constexpr UINT    NPPM_GETCURRENTSCINTILLA = WM_USER + 1000 + 4;
+constexpr UINT    NPPM_SAVECURRENTFILE     = WM_USER + 1000 + 38;
+NppData           g_sNpp{};
+Manager           g_xManager;
+bool              g_bEnabled   = false;
+constexpr wchar_t PluginName[] = L"VimPad++";
 
 void UpdateToggleMenu();
 
@@ -51,7 +52,7 @@ void SaveView(HWND hWindow)
     if (hCurrentView != hWindow)
     {
         MessageBoxW(
-            g_sNpp.hNotepad, L"Could not save: the active editor view changed.", L"VIM Motions", MB_OK | MB_ICONERROR);
+            g_sNpp.hNotepad, L"Could not save: the active editor view changed.", PluginName, MB_OK | MB_ICONERROR);
         return;
     }
     SendMessageW(g_sNpp.hNotepad, NPPM_SAVECURRENTFILE, 0, 0);
@@ -131,7 +132,7 @@ void OpenConfigFolder()
         reinterpret_cast<INT_PTR>(
             ShellExecuteW(g_sNpp.hNotepad, L"open", sDirectory.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32)
         MessageBoxW(
-            g_sNpp.hNotepad, (L"Could not create or open the config folder:\n" + sDirectory).c_str(), L"VIM Motions",
+            g_sNpp.hNotepad, (L"Could not create or open the config folder:\n" + sDirectory).c_str(), PluginName,
             MB_OK | MB_ICONERROR);
 }
 
@@ -141,7 +142,7 @@ void OpenConfig()
     if (!EnsureConfigDirectory(sDirectory))
     {
         MessageBoxW(
-            g_sNpp.hNotepad, (L"Could not create the config folder:\n" + sDirectory).c_str(), L"VIM Motions",
+            g_sNpp.hNotepad, (L"Could not create the config folder:\n" + sDirectory).c_str(), PluginName,
             MB_OK | MB_ICONERROR);
         return;
     }
@@ -152,8 +153,8 @@ void OpenConfig()
     if (bLua && bVim)
     {
         MessageBoxW(
-            g_sNpp.hNotepad, L"Both init.lua and init.vim exist. Remove or rename one before reloading.",
-            L"VIM Motions", MB_OK | MB_ICONERROR);
+            g_sNpp.hNotepad, L"Both init.lua and init.vim exist. Remove or rename one before reloading.", PluginName,
+            MB_OK | MB_ICONERROR);
         return;
     }
     if (!bLua && !bVim)
@@ -161,7 +162,7 @@ void OpenConfig()
         HANDLE hFile = CreateFileW(sLua.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (hFile == INVALID_HANDLE_VALUE)
         {
-            MessageBoxW(g_sNpp.hNotepad, (L"Could not create " + sLua).c_str(), L"VIM Motions", MB_OK | MB_ICONERROR);
+            MessageBoxW(g_sNpp.hNotepad, (L"Could not create " + sLua).c_str(), PluginName, MB_OK | MB_ICONERROR);
             return;
         }
         const char aStarter[] = "-- Add your Neovim settings and mappings here.\r\n";
@@ -171,13 +172,13 @@ void OpenConfig()
         CloseHandle(hFile);
         if (!bWritten)
         {
-            MessageBoxW(g_sNpp.hNotepad, L"Could not write the starter config.", L"VIM Motions", MB_OK | MB_ICONERROR);
+            MessageBoxW(g_sNpp.hNotepad, L"Could not write the starter config.", PluginName, MB_OK | MB_ICONERROR);
             return;
         }
     }
     const std::wstring &sFile = bVim ? sVim : sLua;
     if (!SendMessageW(g_sNpp.hNotepad, NPPM_DOOPEN, 0, reinterpret_cast<LPARAM>(sFile.c_str())))
-        MessageBoxW(g_sNpp.hNotepad, (L"Could not open " + sFile).c_str(), L"VIM Motions", MB_OK | MB_ICONERROR);
+        MessageBoxW(g_sNpp.hNotepad, (L"Could not open " + sFile).c_str(), PluginName, MB_OK | MB_ICONERROR);
 }
 
 void ReloadConfig()
@@ -189,13 +190,12 @@ void ReloadConfig()
         DetachViews();
     if (bLoaded)
         MessageBoxW(
-            g_sNpp.hNotepad, L"Neovim configuration reloaded successfully.", L"VIM Motions",
-            MB_OK | MB_ICONINFORMATION);
+            g_sNpp.hNotepad, L"Neovim configuration reloaded successfully.", PluginName, MB_OK | MB_ICONINFORMATION);
 }
 #endif
 
 FuncItem g_aFunctions[] = {
-    {L"Enable Vim motions", ToggleViews, 0, false, nullptr},
+    {L"Enable VimPad++", ToggleViews, 0, false, nullptr},
 #if !defined(ENABLE_NATIVE_BACKEND)
     {L"Open Neovim config", OpenConfig, 0, false, nullptr},
     {L"Open Neovim config folder", OpenConfigFolder, 0, false, nullptr},
@@ -211,7 +211,7 @@ void UpdateToggleMenu()
 
 extern "C" __declspec(dllexport) void setInfo(NppData sData) { g_sNpp = sData; }
 
-extern "C" __declspec(dllexport) const wchar_t *getName() { return L"VIM Motions"; }
+extern "C" __declspec(dllexport) const wchar_t *getName() { return PluginName; }
 
 extern "C" __declspec(dllexport) FuncItem *getFuncsArray(int *pCount)
 {

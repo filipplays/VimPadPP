@@ -44,7 +44,7 @@ The install targets write to `NOTEPADPP_PLUGIN_DIR`; `runnotepad` uses
 `NOTEPADPP_EXE`. Override either path as needed:
 
 ```sh
-make installnvim NOTEPADPP_PLUGIN_DIR='/path/to/Notepad++/plugins/VIM-Motions-for-NotepadPP'
+make installnvim NOTEPADPP_PLUGIN_DIR='/path/to/Notepad++/plugins/VimPad++'
 make runnotepad NOTEPADPP_EXE='/path/to/notepad++.exe'
 ```
 
