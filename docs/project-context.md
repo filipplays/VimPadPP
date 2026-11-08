@@ -21,11 +21,16 @@ integration with a real Scintilla control. The
 comparison, its generated files, and current limitations. Neither suite
 exercises the Notepad++ plugin lifecycle.
 
-The complete intended feature set, product priorities, and future direction
-are not established by this documentation. Treat current code and tests as
-evidence of implementation, not proof of a broader product requirement.
+Earlier planning explored strong Neovim editing compatibility alongside an
+independent native backend, with a user-facing choice of backend. Runtime
+selection is not implemented; its priority and details remain open. The notes
+also identified questions about safe switching and state preservation,
+document and undo ownership, external edits, Unicode and selections, multiple
+views, recovery after process failure, and support for Neovim configuration,
+plugins, and UI features. These are areas to investigate, not promises of
+support. Treat current code and tests as evidence of implementation, not proof
+of a broader product requirement.
 
-Some local planning material and dependencies are Git-ignored. Do not assume
-they are available in another checkout or that ignored plans describe current
-behavior. The Neovim build also references `plugin/src/neovim_init.lua`; check
-that this file is present in the checkout when investigating that build.
+Dependencies are Git-ignored and may not be available in another checkout. The
+Neovim build also references `plugin/src/neovim_init.lua`; check that this file
+is present in the checkout when investigating that build.

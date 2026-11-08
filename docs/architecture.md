@@ -31,6 +31,21 @@ backend passes relevant keyboard input to `VimEngine`; the Neovim backend
 communicates with its process and applies state to the editor. Shared editor
 helpers wrap Scintilla messages.
 
+Each installed Neovim backend session starts its own embedded Neovim process
+and exchanges MessagePack-RPC messages over standard input and output pipes.
+Requests have the form `[0, id, method, arguments]`, responses are
+`[1, id, error, result]`, and notifications are `[2, method, arguments]`.
+For example, the input key `j` is sent as the notification
+`[2, "nvim_input", ["j"]]`; names such as `<Esc>` are Neovim key notation
+inside the string. The encoder writes multi-byte numbers in big-endian order.
+
+The process starts with the staged `vim-motions-init.lua`. That bootstrap
+loads bundled defaults and then an optional user configuration. Its buffer
+write handler sends a save notification to the host, which performs the save
+after pending state has been applied. Normal response polling uses a timer;
+startup and authoritative host-to-Neovim synchronization also make blocking
+RPC calls, whose pipe reads have a five-second timeout.
+
 The Neovim state helper is installed during authoritative host-to-Neovim
 synchronization. Per-key requests invoke it with the last applied buffer,
 `changedtick`, journal epoch, and edit sequence. The nine-field result is
@@ -79,6 +94,12 @@ document text and caret position. It does not load the Notepad++ plugin DLL or
 test its lifecycle. [Differential fuzzing](../plugin/tests_fuzzing/README.md)
 uses this harness and a local Neovim reference, with documented limitations
 for text-changing sequences and Unicode coverage.
+
+Notepad++ integration needs separate coverage for plugin loading and shutdown,
+view and document switches, Unicode input, shortcuts, and interactions with
+other plugins. Tests that send messages directly to Scintilla can exercise the
+subclass while bypassing Notepad++ keyboard routing and shortcuts; exercise
+the normal application input path as well when testing those interactions.
 
 Build and test targets write files. Functional test targets format all JSON
 fixtures; fuzzing replaces generated output and may remove `.nvimlog`. Review

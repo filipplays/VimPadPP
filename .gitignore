@@ -1,9 +1,10 @@
-port_to_notepadpp
 obsidian
-planning
 plugin/build
 plugin/tests/functional/tmp/
-plugin/NEOVIM_PROTOTYPE.md
 plugin/dependencies/
 **/__pycache__/
 **.nvimlog
+**tmp
+**temp
+scratch/
+tools/
