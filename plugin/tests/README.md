@@ -105,3 +105,35 @@ Each `make test` run writes these generated files under
 
 The executable returns `0` when every case passes, `1` when any case fails,
 and `2` for setup, parsing, or report-writing failures.
+
+## Neovim state protocol checks
+
+These focused checks do not format fixtures or write build outputs into the
+repository. From the repository root:
+
+```sh
+clang++ -std=c++20 -Wall -Wextra -Wpedantic -fsanitize=address,undefined \
+  -Iplugin/src/backends/neovim plugin/tests/neovim/msgpack_frame_test.cpp \
+  -o /private/tmp/vim-msgpack-frame-test
+/private/tmp/vim-msgpack-frame-test
+clang++ -std=c++20 -Wall -Wextra -Wpedantic -fsanitize=address,undefined \
+  -Iplugin/src/backends/neovim plugin/tests/neovim/line_update_test.cpp \
+  -o /private/tmp/vim-line-update-test
+/private/tmp/vim-line-update-test
+python3 plugin/tests/neovim/state_snapshot_test.py
+```
+
+The framing test covers fragmented and coalesced MessagePack frames, all tag
+families, large payloads, nesting limits, and invalid frames. The line-update
+test compares byte-range replacements with independent line-array splices
+across LF, CRLF, CR, Unicode bytes, EOF insertions/deletions, trailing empty
+lines, and empty documents.
+
+The Python test requires a local Neovim (`--nvim /path/to/nvim` overrides the
+executable) and uses an embedded RPC process to exercise the Lua helper and
+per-key request extracted from the backend. It checks motion-only responses,
+small edit payloads, ordered replay after a discarded response, acknowledgment
+and history release, undo/redo, multiple changes between requests, buffer
+switches, reloads, retention limits, and the baseline after a host text push.
+Generated Lua scripts stay in the system temporary directory. These checks do
+not exercise the Windows pipe transport or Scintilla application path.

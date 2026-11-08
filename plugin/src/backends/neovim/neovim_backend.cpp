@@ -1,13 +1,13 @@
 #include "neovim_backend.h"
 #include "ScintillaMessages.h"
+// #include "../common/helpers.h" // Uncomment for the timing hooks below.
 
 #include <algorithm>
 #include <commctrl.h>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <string>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace
@@ -251,7 +251,6 @@ bool Backend_NVIM::SendRpc(const std::string &sMethod, const std::string &sArgum
     AppendMsgPackString(sRequest, sMethod);
     sRequest += sArguments;
     DWORD nWritten = 0;
-    // std::cout << "---Request: " << sRequest << std::endl;
     return WriteFile(m_sSession.hInput, sRequest.data(), static_cast<DWORD>(sRequest.size()), &nWritten, nullptr) &&
            nWritten == sRequest.size();
 }
@@ -381,35 +380,121 @@ bool Backend_NVIM::HandleNotification(const Value &sNotification)
     }
     return true;
 }
-std::string Backend_NVIM::BuildStateArguments()
+std::string Backend_NVIM::BuildStateArguments(bool bAcceptCurrent)
 {
-    std::string sArgs;
-    AppendMsgPackArrayHeader(sArgs, 1);
-    AppendMsgPackArrayHeader(sArgs, 3);
+    std::string           sArgs;
+    // Run the comparison and snapshot together, before serializing any document text.
+    static constexpr char StateSnapshotLua[] = R"lua(
+local function snapshot(nKnownBuffer, nKnownTick, nKnownEpoch, nKnownSequence, bAcceptCurrent)
+  local nBuffer = vim.api.nvim_get_current_buf()
+  local nTick = vim.api.nvim_buf_get_changedtick(nBuffer)
+  local sStore = rawget(_G, '__vim_motions_sync')
+  if not sStore then
+    sStore = {nEpoch = 0}
+    rawset(_G, '__vim_motions_sync', sStore)
+  end
+  local sJournal = sStore.sJournal
+  -- A reset follows an authoritative host-to-Neovim text push. Reloads, detach,
+  -- buffer switches and untracked tick changes also require a fresh baseline.
+  if bAcceptCurrent or not sJournal or not sJournal.bValid or sJournal.nBuffer ~= nBuffer
+      or sJournal.nObservedTick ~= nTick then
+    if sJournal then
+      sJournal.bValid = false
+      sJournal.aChanges = {}
+      sJournal.aCheckpoints = {}
+    end
+    sStore.nEpoch = sStore.nEpoch + 1
+    sJournal = {nBuffer = nBuffer, nEpoch = sStore.nEpoch, nSequence = 0,
+                nFirstSequence = 1, nBytes = 0, nObservedTick = nTick,
+                aChanges = {}, aCheckpoints = {}, bValid = true}
+    sStore.sJournal = sJournal
+    local function record(nChangedTick, nFirst, nLast, aLines)
+      if sStore.sJournal ~= sJournal or not sJournal.bValid then return true end
+      sJournal.nSequence = sJournal.nSequence + 1
+      sJournal.nObservedTick = nChangedTick
+      local nBytes = 64
+      for _, sLine in ipairs(aLines) do nBytes = nBytes + #sLine + 1 end
+      sJournal.aChanges[sJournal.nSequence] = {sJournal.nSequence, nFirst, nLast, aLines, nBytes}
+      sJournal.nBytes = sJournal.nBytes + nBytes
+      -- Bounded retention. An older client receives a full snapshot instead.
+      while sJournal.nSequence - sJournal.nFirstSequence + 1 > 1024 or sJournal.nBytes > 4 * 1024 * 1024 do
+        local sOld = sJournal.aChanges[sJournal.nFirstSequence]
+        sJournal.nBytes = sJournal.nBytes - sOld[5]
+        sJournal.aChanges[sJournal.nFirstSequence] = nil
+        sJournal.nFirstSequence = sJournal.nFirstSequence + 1
+      end
+    end
+    local function invalidate()
+      sJournal.bValid = false
+      sJournal.aChanges = {}
+      sJournal.aCheckpoints = {}
+    end
+    assert(vim.api.nvim_buf_attach(nBuffer, false, {
+      on_lines = function(_, nBuf, nChangedTick, nFirst, nLast, nNewLast)
+        if sStore.sJournal ~= sJournal or not sJournal.bValid then return true end
+        return record(nChangedTick, nFirst, nLast, vim.api.nvim_buf_get_lines(nBuf, nFirst, nNewLast, true))
+      end,
+      on_changedtick = function(_, _, nChangedTick)
+        return record(nChangedTick, -1, -1, {})
+      end,
+      on_reload = invalidate,
+      on_detach = invalidate,
+    }))
+  end
+  local bCanReplay = nKnownBuffer == nBuffer and nKnownEpoch == sJournal.nEpoch
+      and nKnownSequence >= sJournal.nFirstSequence - 1 and nKnownSequence <= sJournal.nSequence
+      and sJournal.aCheckpoints[nKnownSequence] == nKnownTick
+  local nKind, aPayload, nBaseSequence = 0, vim.NIL, -1
+  if bCanReplay then
+    -- Only a later request acknowledging an issued checkpoint releases history.
+    while sJournal.nFirstSequence <= nKnownSequence do
+      local sOld = sJournal.aChanges[sJournal.nFirstSequence]
+      sJournal.nBytes = sJournal.nBytes - sOld[5]
+      sJournal.aChanges[sJournal.nFirstSequence] = nil
+      sJournal.nFirstSequence = sJournal.nFirstSequence + 1
+    end
+    nBaseSequence = nKnownSequence
+    if nKnownSequence < sJournal.nSequence then
+      nKind, aPayload = 2, {}
+      for nSequence = nKnownSequence + 1, sJournal.nSequence do
+        local sChange = sJournal.aChanges[nSequence]
+        aPayload[#aPayload + 1] = {sChange[1], sChange[2], sChange[3], sChange[4]}
+      end
+    end
+  elseif not bAcceptCurrent then
+    nKind = 1
+    aPayload = vim.api.nvim_buf_get_lines(nBuffer, 0, -1, true)
+  end
+  for nSequence in pairs(sJournal.aCheckpoints) do
+    if nSequence < sJournal.nFirstSequence - 1 then sJournal.aCheckpoints[nSequence] = nil end
+  end
+  sJournal.aCheckpoints[sJournal.nSequence] = nTick
+  return {nBuffer, nTick, sJournal.nEpoch, nBaseSequence, sJournal.nSequence, nKind, aPayload,
+          vim.api.nvim_win_get_cursor(0), {vim.fn.mode(1), vim.fn.getpos('v')}}
+end
+_G.__vim_motions_state = snapshot
+return snapshot(...)
+)lua";
+    static constexpr char StateRequestLua[]  = "return _G.__vim_motions_state(...)";
     AppendMsgPackArrayHeader(sArgs, 2);
-    AppendMsgPackString(sArgs, "nvim_buf_get_lines");
-    AppendMsgPackArrayHeader(sArgs, 4);
-    AppendMsgPackInteger(sArgs, 0);
-    AppendMsgPackInteger(sArgs, 0);
-    AppendMsgPackInteger(sArgs, -1);
-    AppendMsgPackBoolean(sArgs, true);
-    AppendMsgPackArrayHeader(sArgs, 2);
-    AppendMsgPackString(sArgs, "nvim_win_get_cursor");
-    AppendMsgPackArrayHeader(sArgs, 1);
-    AppendMsgPackInteger(sArgs, 0);
-    AppendMsgPackArrayHeader(sArgs, 2);
-    AppendMsgPackString(sArgs, "nvim_eval");
-    AppendMsgPackArrayHeader(sArgs, 1);
-    AppendMsgPackString(sArgs, "[mode(1), getpos('v')]");
+    // Install the collector once during host synchronization. Per-key RPCs stay small.
+    AppendMsgPackString(sArgs, bAcceptCurrent ? StateSnapshotLua : StateRequestLua);
+    AppendMsgPackArrayHeader(sArgs, 5);
+    AppendMsgPackInteger(sArgs, m_sSession.nSyncedBuffer);
+    AppendMsgPackInteger(sArgs, m_sSession.nSyncedChangedTick);
+    AppendMsgPackInteger(sArgs, m_sSession.nSyncedEpoch);
+    AppendMsgPackInteger(sArgs, m_sSession.nSyncedSequence);
+    AppendMsgPackBoolean(sArgs, bAcceptCurrent);
     return sArgs;
 }
 bool Backend_NVIM::RequestNeovimState()
 {
-    // std::cout << "Request state" << std::endl;
     if (m_sSession.nStateId)
         return true;
     m_sSession.nStateRevision = m_sSession.nRevision;
-    return SendRpc("nvim_call_atomic", BuildStateArguments(), m_sSession.nStateId);
+    if (!SendRpc("nvim_exec_lua", BuildStateArguments(), m_sSession.nStateId))
+        return false;
+    return true;
 }
 bool Backend_NVIM::SendKey(const std::string &sKey)
 {
@@ -460,10 +545,10 @@ void Backend_NVIM::OnCaretMoved(LRESULT nPosition)
 }
 bool Backend_NVIM::SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT nColumn)
 {
-    // std::cout << "Document SYNC" << std::endl;
+    InvalidateSyncedRevision();
     std::string sArgs;
     AppendMsgPackArrayHeader(sArgs, 1);
-    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackArrayHeader(sArgs, 3);
     AppendMsgPackArrayHeader(sArgs, 2);
     AppendMsgPackString(sArgs, "nvim_buf_set_lines");
     AppendMsgPackArrayHeader(sArgs, 5);
@@ -491,9 +576,24 @@ bool Backend_NVIM::SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT n
     AppendMsgPackArrayHeader(sArgs, 2);
     AppendMsgPackInteger(sArgs, nLine + 1);
     AppendMsgPackInteger(sArgs, nColumn);
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackString(sArgs, "nvim_exec_lua");
+    sArgs += BuildStateArguments(true);
     Value sResult;
-    return CallRpcAndWait("nvim_call_atomic", sArgs, sResult) && sResult.nType == 3 && sResult.aItems.size() == 2 &&
-           sResult.aItems[1].nType == 0;
+    if (!CallRpcAndWait("nvim_call_atomic", sArgs, sResult) || sResult.nType != 3 || sResult.aItems.size() != 2 ||
+        sResult.aItems[1].nType != 0 || sResult.aItems[0].nType != 3 || sResult.aItems[0].aItems.size() != 3)
+        return false;
+    const Value &sRevision = sResult.aItems[0].aItems[2];
+    if (sRevision.nType != 3 || sRevision.aItems.size() != 9 || sRevision.aItems[0].nType != 1 ||
+        sRevision.aItems[0].nInteger <= 0 || sRevision.aItems[1].nType != 1 || sRevision.aItems[1].nInteger < 0 ||
+        sRevision.aItems[2].nType != 1 || sRevision.aItems[2].nInteger <= 0 || sRevision.aItems[4].nType != 1 ||
+        sRevision.aItems[4].nInteger < 0 || sRevision.aItems[5].nType != 1 || sRevision.aItems[5].nInteger != 0)
+        return false;
+    m_sSession.nSyncedBuffer      = sRevision.aItems[0].nInteger;
+    m_sSession.nSyncedChangedTick = sRevision.aItems[1].nInteger;
+    m_sSession.nSyncedEpoch       = sRevision.aItems[2].nInteger;
+    m_sSession.nSyncedSequence    = sRevision.aItems[4].nInteger;
+    return true;
 }
 std::string Backend_NVIM::GetEditorText()
 {
@@ -526,22 +626,64 @@ std::string Backend_NVIM::NormalizeLineEndingsToLf(const std::string &sText)
     }
     return sResult;
 }
-std::string Backend_NVIM::RestoreDocumentLineEndings(const std::string &sText)
+std::string Backend_NVIM::DocumentLineEnding()
 {
     LRESULT nEol = m_sEditor.Send(Scintilla::GETEOLMODE);
     if (m_sSession.sText.find('\n') != std::string::npos)
         nEol = m_sSession.sText.find("\r\n") != std::string::npos ? Scintilla::EOL_CRLF : Scintilla::EOL_LF;
     else if (m_sSession.sText.find('\r') != std::string::npos)
         nEol = Scintilla::EOL_CR;
-    if (nEol == Scintilla::EOL_LF)
+    return nEol == Scintilla::EOL_CRLF ? "\r\n" : nEol == Scintilla::EOL_CR ? "\r" : "\n";
+}
+std::string Backend_NVIM::RestoreDocumentLineEndings(const std::string &sText)
+{
+    const std::string sEol = DocumentLineEnding();
+    if (sEol == "\n")
         return sText;
     std::string sResult;
     for (char nChar : sText)
         if (nChar == '\n')
-            sResult += nEol == Scintilla::EOL_CRLF ? "\r\n" : "\r";
+            sResult += sEol;
         else
             sResult += nChar;
     return sResult;
+}
+void Backend_NVIM::InvalidateSyncedRevision()
+{
+    m_sSession.nSyncedBuffer      = -1;
+    m_sSession.nSyncedChangedTick = -1;
+    m_sSession.nSyncedEpoch       = -1;
+    m_sSession.nSyncedSequence    = -1;
+}
+bool Backend_NVIM::ApplyTextReplacement(size_t nStart, size_t nEnd, const std::string &sText)
+{
+    if (nStart > nEnd || nEnd > m_sSession.sText.size())
+        return false;
+    // Limit the comparison to the supplied replacement range, including on the
+    // full-snapshot recovery path. Small line updates never scan the whole file.
+    size_t nPrefix = 0;
+    while (nStart < nEnd && nPrefix < sText.size() && m_sSession.sText[nStart] == sText[nPrefix])
+    {
+        ++nStart;
+        ++nPrefix;
+    }
+    size_t nNewEnd = sText.size();
+    while (nEnd > nStart && nNewEnd > nPrefix && m_sSession.sText[nEnd - 1] == sText[nNewEnd - 1])
+    {
+        --nEnd;
+        --nNewEnd;
+    }
+    if (nStart == nEnd && nPrefix == nNewEnd)
+        return true;
+    (void)m_sEditor.Send(Scintilla::SETTARGETSTART, nStart);
+    (void)m_sEditor.Send(Scintilla::SETTARGETEND, nEnd);
+    const size_t  nNewLength = nNewEnd - nPrefix;
+    const LRESULT nReplaced =
+        m_sEditor.Send(Scintilla::REPLACETARGET, nNewLength, reinterpret_cast<LPARAM>(sText.data() + nPrefix));
+    if (nReplaced != static_cast<LRESULT>(nNewLength))
+        return false;
+    m_sSession.sText.replace(nStart, nEnd - nStart, sText.data() + nPrefix, nNewLength);
+    return true;
 }
 bool Backend_NVIM::StartNeovimProcess()
 {
@@ -597,63 +739,128 @@ void Backend_NVIM::StopAndReportError(const wchar_t *pMessage)
     StopNeovimProcess();
     MessageBoxW(m_hWindow, pMessage, L"Neovim prototype", MB_OK | MB_ICONERROR);
 }
-bool Backend_NVIM::SyncDocument(const Value &sResult)
+Backend_NVIM::SyncResult Backend_NVIM::SyncDocument(const Value &sResult)
 {
-    // std::cout << "APPLY STATE" << std::endl;
-    if (sResult.nType != 3 || sResult.aItems.size() != 2 || sResult.aItems[1].nType != 0 ||
-        sResult.aItems[0].nType != 3 || sResult.aItems[0].aItems.size() != 3)
-        return false;
-    const Value &sLines     = sResult.aItems[0].aItems[0];
-    const Value &sCursor    = sResult.aItems[0].aItems[1];
-    const Value &sModeState = sResult.aItems[0].aItems[2];
-    if (sLines.nType != 3 || sCursor.nType != 3 || sCursor.aItems.size() != 2 || sCursor.aItems[0].nType != 1 ||
-        sCursor.aItems[1].nType != 1 || sModeState.nType != 3 || sModeState.aItems.size() != 2 ||
+    // ScopedTimer sTimer("Apply state to Scintilla");
+    if (sResult.nType != 3 || sResult.aItems.size() != 9)
+        return SyncResult::FAILED;
+    for (size_t nIndex = 0; nIndex < 6; ++nIndex)
+        if (sResult.aItems[nIndex].nType != 1)
+            return SyncResult::FAILED;
+    const int64_t nBuffer       = sResult.aItems[0].nInteger;
+    const int64_t nChangedTick  = sResult.aItems[1].nInteger;
+    const int64_t nEpoch        = sResult.aItems[2].nInteger;
+    const int64_t nBaseSequence = sResult.aItems[3].nInteger;
+    const int64_t nSequence     = sResult.aItems[4].nInteger;
+    const int64_t nKind         = sResult.aItems[5].nInteger;
+    const Value  &sPayload      = sResult.aItems[6];
+    const Value  &sCursor       = sResult.aItems[7];
+    const Value  &sModeState    = sResult.aItems[8];
+    if (nBuffer <= 0 || nChangedTick < 0 || nEpoch <= 0 || nSequence < 0 || nKind < 0 || nKind > 2 ||
+        (nKind == 0 ? sPayload.nType != 0 : sPayload.nType != 3) || sCursor.nType != 3 || sCursor.aItems.size() != 2 ||
+        sCursor.aItems[0].nType != 1 || sCursor.aItems[0].nInteger < 1 || sCursor.aItems[1].nType != 1 ||
+        sCursor.aItems[1].nInteger < 0 || sModeState.nType != 3 || sModeState.aItems.size() != 2 ||
         sModeState.aItems[0].nType != 2 || sModeState.aItems[0].sString.empty() || sModeState.aItems[1].nType != 3 ||
         sModeState.aItems[1].aItems.size() != 4 || sModeState.aItems[1].aItems[1].nType != 1 ||
         sModeState.aItems[1].aItems[2].nType != 1)
-        return false;
-    std::string sText;
-    for (size_t nIndex = 0; nIndex < sLines.aItems.size(); ++nIndex)
+        return SyncResult::FAILED;
+    if (nKind != 1 && (nBuffer != m_sSession.nSyncedBuffer || nEpoch != m_sSession.nSyncedEpoch ||
+                       nBaseSequence != m_sSession.nSyncedSequence || nSequence < nBaseSequence ||
+                       (nKind == 0 && (nSequence != nBaseSequence || nChangedTick != m_sSession.nSyncedChangedTick))))
+        return SyncResult::RESYNC;
+    const bool bDocumentChanged =
+        m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument || GetEditorText() != m_sSession.sText;
+    if (bDocumentChanged)
+        return SyncResult::SKIPPED;
+    std::vector<NeovimLineUpdate> aUpdates;
+    if (nKind == 2)
     {
-        if (sLines.aItems[nIndex].nType != 2)
-            return false;
-        if (nIndex)
-            sText += '\n';
-        sText += sLines.aItems[nIndex].sString;
+        int64_t nExpectedSequence = nBaseSequence;
+        int64_t nLineCount        = m_sEditor.Send(Scintilla::GETLINECOUNT);
+        for (const Value &sUpdate : sPayload.aItems)
+        {
+            if (sUpdate.nType != 3 || sUpdate.aItems.size() != 4 || sUpdate.aItems[0].nType != 1 ||
+                sUpdate.aItems[1].nType != 1 || sUpdate.aItems[2].nType != 1 || sUpdate.aItems[3].nType != 3)
+                return SyncResult::FAILED;
+            if (nExpectedSequence == INT64_MAX || sUpdate.aItems[0].nInteger != ++nExpectedSequence)
+                return SyncResult::RESYNC;
+            const int64_t nFirst = sUpdate.aItems[1].nInteger;
+            const int64_t nLast  = sUpdate.aItems[2].nInteger;
+            const auto   &aLines = sUpdate.aItems[3].aItems;
+            if (nFirst == -1 && nLast == -1 && aLines.empty())
+                continue; // changedtick advanced without changing text.
+            if (nFirst < 0 || nLast < nFirst || nLast > nLineCount)
+                return SyncResult::RESYNC;
+            NeovimLineUpdate sLineUpdate{static_cast<size_t>(nFirst), static_cast<size_t>(nLast), {}};
+            for (const Value &sLine : aLines)
+            {
+                if (sLine.nType != 2 || sLine.sString.find('\n') != std::string::npos ||
+                    !ContainsNoNulBytes(sLine.sString))
+                    return SyncResult::FAILED;
+                sLineUpdate.aLines.push_back(sLine.sString);
+            }
+            // Neovim reports deleting every line as an empty replacement; both
+            // editors retain one implicit empty logical line afterward.
+            nLineCount = std::max<int64_t>(1, nLineCount + static_cast<int64_t>(aLines.size()) - (nLast - nFirst));
+            aUpdates.push_back(std::move(sLineUpdate));
+        }
+        if (nExpectedSequence != nSequence)
+            return SyncResult::RESYNC;
     }
-    // std::cout << "Got text: " << sText << std::endl;
-    if (m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument || GetEditorText() != m_sSession.sText)
-        return true;
     struct StateUpdateGuard
     {
         bool &bApplying;
         explicit StateUpdateGuard(bool &bFlag) : bApplying(bFlag) { bApplying = true; }
         ~StateUpdateGuard() { bApplying = false; }
     } sGuard(m_sSession.bApplyingState);
-    const std::string sNewText = RestoreDocumentLineEndings(sText);
-    if (sNewText != m_sSession.sText)
+    if (nKind == 1)
     {
-        size_t nStart = 0;
-        while (nStart < sNewText.size() && nStart < m_sSession.sText.size() &&
-               sNewText[nStart] == m_sSession.sText[nStart])
-            ++nStart;
-        size_t nOldEnd = m_sSession.sText.size(), nNewEnd = sNewText.size();
-        while (nOldEnd > nStart && nNewEnd > nStart && m_sSession.sText[nOldEnd - 1] == sNewText[nNewEnd - 1])
+        std::string sText;
+        for (size_t nIndex = 0; nIndex < sPayload.aItems.size(); ++nIndex)
         {
-            --nOldEnd;
-            --nNewEnd;
+            if (sPayload.aItems[nIndex].nType != 2)
+                return SyncResult::FAILED;
+            if (nIndex)
+                sText += '\n';
+            sText += sPayload.aItems[nIndex].sString;
         }
-        (void)m_sEditor.Send(Scintilla::SETTARGETSTART, nStart);
-        (void)m_sEditor.Send(Scintilla::SETTARGETEND, nOldEnd);
-        (void)m_sEditor.Send(
-            Scintilla::REPLACETARGET, nNewEnd - nStart, reinterpret_cast<LPARAM>(sNewText.data() + nStart));
-        m_sSession.sText = sNewText;
+        const std::string sNewText = RestoreDocumentLineEndings(sText);
+        if (sPayload.aItems.empty() || !ApplyTextReplacement(0, m_sSession.sText.size(), sNewText))
+            return SyncResult::FAILED;
     }
-    const Mode eMode   = static_cast<Mode>(sModeState.aItems[0].sString[0]);
-    m_sSession.eMode   = eMode;
-    const bool bInsert = eMode == Mode::Insert || eMode == Mode::Replace;
-    (void)m_sEditor.Send(Scintilla::SETCARETSTYLE, bInsert ? Scintilla::CARETSTYLE_LINE : Scintilla::CARETSTYLE_BLOCK);
-    (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, bInsert ? m_nOriginalCaretPeriod : 0);
+    else if (nKind == 2)
+    {
+        const std::string sEol = DocumentLineEnding();
+        for (const auto &sUpdate : aUpdates)
+        {
+            const size_t nLineCount = static_cast<size_t>(m_sEditor.Send(Scintilla::GETLINECOUNT));
+            const size_t nLength    = m_sSession.sText.size();
+            const size_t nStart =
+                sUpdate.nFirstLine == nLineCount
+                    ? nLength
+                    : static_cast<size_t>(m_sEditor.Send(Scintilla::POSITIONFROMLINE, sUpdate.nFirstLine));
+            const size_t nEnd =
+                sUpdate.nLastLine == nLineCount
+                    ? nLength
+                    : static_cast<size_t>(m_sEditor.Send(Scintilla::POSITIONFROMLINE, sUpdate.nLastLine));
+            const size_t nPreviousEnd =
+                sUpdate.nFirstLine
+                    ? static_cast<size_t>(m_sEditor.Send(Scintilla::GETLINEENDPOSITION, sUpdate.nFirstLine - 1))
+                    : 0;
+            const auto sReplacement = BuildLineReplacement(sUpdate, nLineCount, nStart, nEnd, nPreviousEnd, sEol);
+            if (!ApplyTextReplacement(sReplacement.nStart, sReplacement.nEnd, sReplacement.sText))
+                return SyncResult::FAILED;
+        }
+    }
+    const Mode eMode = static_cast<Mode>(sModeState.aItems[0].sString[0]);
+    if (eMode != m_sSession.eMode)
+    {
+        const bool bInsert = eMode == Mode::Insert || eMode == Mode::Replace;
+        (void)m_sEditor.Send(
+            Scintilla::SETCARETSTYLE, bInsert ? Scintilla::CARETSTYLE_LINE : Scintilla::CARETSTYLE_BLOCK);
+        (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, bInsert ? m_nOriginalCaretPeriod : 0);
+        m_sSession.eMode = eMode;
+    }
     const LRESULT nLine   = static_cast<LRESULT>(sCursor.aItems[0].nInteger - 1);
     const LRESULT nStart  = m_sEditor.Send(Scintilla::POSITIONFROMLINE, nLine);
     const LRESULT nCaret  = nStart + static_cast<LRESULT>(sCursor.aItems[1].nInteger);
@@ -666,7 +873,7 @@ bool Backend_NVIM::SyncDocument(const Value &sResult)
         const LRESULT nAnchorLine  = static_cast<LRESULT>(sAnchor.aItems[1].nInteger - 1);
         const LRESULT nAnchorStart = m_sEditor.Send(Scintilla::POSITIONFROMLINE, nAnchorLine);
         if (nAnchorLine < 0 || nAnchorStart < 0 || sAnchor.aItems[2].nInteger < 1)
-            return false;
+            return SyncResult::FAILED;
         const LRESULT nAnchor = nAnchorStart + static_cast<LRESULT>(sAnchor.aItems[2].nInteger - 1);
         if (eMode == Mode::VisualLine)
         {
@@ -705,12 +912,17 @@ bool Backend_NVIM::SyncDocument(const Value &sResult)
             }
         }
     }
-    m_sSession.nKnownCaret = m_sEditor.Caret();
-    return true;
+    m_sSession.nKnownCaret        = m_sEditor.Caret();
+    // Never acknowledge stale, skipped or partially applied snapshots.
+    m_sSession.nSyncedBuffer      = nBuffer;
+    m_sSession.nSyncedChangedTick = nChangedTick;
+    m_sSession.nSyncedEpoch       = nEpoch;
+    m_sSession.nSyncedSequence    = nSequence;
+    return SyncResult::APPLIED;
 }
 bool Backend_NVIM::PollResponses()
 {
-    // std::cout << "--POLL RESPONSE--" << std::endl;
+    // ScopedTimer sTimer("Poll Neovim responses");
     DWORD nAvailable = 0;
     if (!PeekNamedPipe(m_sSession.hOutput, nullptr, 0, nullptr, &nAvailable, nullptr))
         return false;
@@ -730,14 +942,22 @@ bool Backend_NVIM::PollResponses()
         return false;
     for (;;)
     {
+        const auto eFrame = m_sSession.sIncomingFrame.Scan(m_sSession.sIncoming);
+        if (eFrame == MsgPackFrame::Result::INVALID)
+            return false;
+        if (eFrame == MsgPackFrame::Result::NEED_MORE)
+        {
+            break;
+        }
         m_sSession.nReadOffset   = 0;
         m_sSession.bBufferedRead = true;
-        Value sResponse;
-        bool  bComplete          = DecodeMsgPackValue(sResponse);
+        Value      sResponse;
+        const bool bComplete     = DecodeMsgPackValue(sResponse);
         m_sSession.bBufferedRead = false;
-        if (!bComplete)
-            break;
+        if (!bComplete || m_sSession.nReadOffset != m_sSession.sIncomingFrame.Size())
+            return false;
         m_sSession.sIncoming.erase(0, m_sSession.nReadOffset);
+        m_sSession.sIncomingFrame.Reset();
         if (sResponse.nType == 3 && !sResponse.aItems.empty() && sResponse.aItems[0].nInteger == 2)
         {
             if (!HandleNotification(sResponse))
@@ -757,7 +977,7 @@ bool Backend_NVIM::PollResponses()
             }
             else
             {
-                for (const std::string &sKey : m_sSession.aPendingKeys)
+                for (const auto &sKey : m_sSession.aPendingKeys)
                     if (!SendKey(sKey))
                         return false;
                 m_sSession.aPendingKeys.clear();
@@ -773,10 +993,19 @@ bool Backend_NVIM::PollResponses()
         {
             if (!RequestNeovimState())
                 return false;
+            continue;
         }
-        else if (!SyncDocument(sResponse.aItems[3]))
+        const auto eResult = SyncDocument(sResponse.aItems[3]);
+        if (eResult == SyncResult::FAILED)
             return false;
-        else if (m_sSession.bSavePending && !m_sSession.nCaretId && m_sSession.aPendingKeys.empty())
+        if (eResult == SyncResult::RESYNC)
+        {
+            InvalidateSyncedRevision();
+            if (!RequestNeovimState())
+                return false;
+            continue;
+        }
+        if (m_sSession.bSavePending && !m_sSession.nCaretId && m_sSession.aPendingKeys.empty())
         {
             m_sSession.bSavePending = false;
             if (m_pSaveHandler && m_sEditor.Send(Scintilla::GETDOCPOINTER) == m_sSession.nDocument &&
@@ -798,6 +1027,7 @@ BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPA
     }
     else if ((nMessage == WM_CHAR || nMessage == WM_KEYDOWN) && !m_sSession.bFailed)
     {
+        // ScopedTimer sTimer("Handle input message");
         std::string sKey;
         if (nMessage == WM_KEYDOWN)
         {
@@ -916,10 +1146,14 @@ BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPA
             char    aUtf8[4];
             int     nBytes = WideCharToMultiByte(CP_UTF8, 0, &nChar, 1, aUtf8, sizeof(aUtf8), nullptr, nullptr);
             if (nBytes <= 0)
+            {
                 return TRUE;
+            }
             sKey.assign(aUtf8, nBytes);
         }
-        if (m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument || GetEditorText() != m_sSession.sText)
+        const bool bDocumentChanged =
+            m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument || GetEditorText() != m_sSession.sText;
+        if (bDocumentChanged)
         {
             std::string sText = GetEditorText();
             if (!ContainsNoNulBytes(sText))
@@ -947,7 +1181,12 @@ BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPA
             m_sSession.aPendingKeys.push_back(sKey);
             return TRUE;
         }
-        if (!SendKey(sKey) || !RequestNeovimState())
+        if (!SendKey(sKey))
+        {
+            StopAndReportError(L"Neovim communication failed.");
+            return TRUE;
+        }
+        if (!RequestNeovimState())
         {
             StopAndReportError(L"Neovim communication failed.");
             return TRUE;
@@ -1036,6 +1275,7 @@ BOOL Backend_NVIM::Install()
     }
     (void)m_sEditor.Send(Scintilla::SETCARETSTYLE, Scintilla::CARETSTYLE_BLOCK);
     (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, 0);
+    m_sSession.eMode = Mode::Normal;
     if (!SetTimer(m_hWindow, NeovimResponseTimerId, 10, nullptr))
     {
         StopAndReportError(L"Could not start the Neovim response timer.");

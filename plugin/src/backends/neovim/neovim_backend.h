@@ -2,6 +2,8 @@
 
 #include "../common/backend_common.h"
 #include "../common/editor_text.h"
+#include "line_update.h"
+#include "msgpack_frame.h"
 
 #include <cstdint>
 #include <string>
@@ -49,19 +51,31 @@ class Backend_NVIM : public Backend
         std::string              sText;
         bool                     bFailed = false;
         std::string              sIncoming;
-        size_t                   nReadOffset     = 0;
-        bool                     bBufferedRead   = false;
-        unsigned                 nStateId        = 0;
-        unsigned                 nRevision       = 0;
-        unsigned                 nStateRevision  = 0;
-        unsigned                 nCaretId        = 0;
-        UINT_PTR                 nTimer          = 0;
-        LRESULT                  nKnownCaret     = 0;
-        LRESULT                  nRequestedCaret = 0;
-        bool                     bApplyingState  = false;
-        bool                     bSavePending    = false;
-        Mode                     eMode           = Mode::Normal;
+        MsgPackFrame             sIncomingFrame;
+        int64_t                  nSyncedBuffer      = -1;
+        int64_t                  nSyncedChangedTick = -1;
+        int64_t                  nSyncedEpoch       = -1;
+        int64_t                  nSyncedSequence    = -1;
+        size_t                   nReadOffset        = 0;
+        bool                     bBufferedRead      = false;
+        unsigned                 nStateId           = 0;
+        unsigned                 nRevision          = 0;
+        unsigned                 nStateRevision     = 0;
+        unsigned                 nCaretId           = 0;
+        UINT_PTR                 nTimer             = 0;
+        LRESULT                  nKnownCaret        = 0;
+        LRESULT                  nRequestedCaret    = 0;
+        bool                     bApplyingState     = false;
+        bool                     bSavePending       = false;
+        Mode                     eMode              = Mode::Normal;
         std::vector<std::string> aPendingKeys;
+    };
+    enum class SyncResult
+    {
+        APPLIED,
+        SKIPPED,
+        RESYNC,
+        FAILED
     };
     Session    m_sSession;
     EditorText m_sEditor;
@@ -91,7 +105,7 @@ class Backend_NVIM : public Backend
     bool HandleNotification(const Value &sNotification);
     void UpdateCommandBar();
     void PositionCommandBar();
-    std::string BuildStateArguments();
+    std::string BuildStateArguments(bool bAcceptCurrent = false);
     bool        RequestNeovimState();
     bool        SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT nColumn);
     bool        RequestCaretSync();
@@ -100,8 +114,11 @@ class Backend_NVIM : public Backend
     bool        ContainsNoNulBytes(const std::string &sText);
     std::string NormalizeLineEndingsToLf(const std::string &sText);
     std::string RestoreDocumentLineEndings(const std::string &sText);
+    std::string DocumentLineEnding();
+    void        InvalidateSyncedRevision();
+    bool        ApplyTextReplacement(size_t nStart, size_t nEnd, const std::string &sText);
     bool        StartNeovimProcess();
     void        StopAndReportError(const wchar_t *pMessage);
-    bool        SyncDocument(const Value &sResult);
+    SyncResult  SyncDocument(const Value &sResult);
     bool        PollResponses();
 };

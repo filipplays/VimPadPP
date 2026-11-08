@@ -15,7 +15,7 @@ endif
 NATIVE_SOURCES := $(addprefix src/backends/native/,native_backend.cpp vim_engine.cpp vim_commands.cpp vim_motions.cpp vim_actions.cpp vim_operators.cpp)
 NEOVIM_SOURCES := src/backends/neovim/neovim_backend.cpp
 CXXFLAGS_NATIVE += -DENABLE_NATIVE_BACKEND
-CORE_SOURCES := src/backends/common/backend_manager.cpp src/backends/common/backend_common.cpp src/backends/common/editor_text.cpp src/backends/common/scintilla_editor.cpp
+CORE_SOURCES := src/backends/common/backend_manager.cpp src/backends/common/backend_common.cpp src/backends/common/editor_text.cpp src/backends/common/scintilla_editor.cpp src/backends/common/helpers.cpp
 CORE_SOURCES_NATIVE := $(CORE_SOURCES) $(NATIVE_SOURCES)
 CORE_SOURCES_NEOVIM := $(CORE_SOURCES) $(NEOVIM_SOURCES)
 CORE_HEADERS := $(wildcard include/*.h src/backends/common/*.h src/backends/native/*.h src/backends/neovim/*.h)
