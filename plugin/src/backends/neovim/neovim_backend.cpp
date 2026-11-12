@@ -23,6 +23,11 @@ void Backend_NVIM::CloseHandleAndReset(HANDLE &hHandle)
 }
 void Backend_NVIM::StopNeovimProcess()
 {
+    if (m_bScrollPastEnd)
+    {
+        (void)m_sEditor.Send(Scintilla::SETENDATLASTLINE, m_bOriginalEndAtLastLine);
+        m_bScrollPastEnd = false;
+    }
     if (m_sSession.nTimer)
         KillTimer(m_hWindow, m_sSession.nTimer);
     m_sSession.nTimer = 0;
@@ -316,6 +321,12 @@ void Backend_NVIM::UpdateCommandBar()
     if (sText.empty())
     {
         ShowWindow(m_hCommandBar, SW_HIDE);
+        if (m_bScrollPastEnd)
+        {
+            (void)m_sEditor.Send(Scintilla::SETENDATLASTLINE, m_bOriginalEndAtLastLine);
+            m_bScrollPastEnd = false;
+        }
+        EnsureCaretVisible();
         return;
     }
     std::replace(sText.begin(), sText.end(), '\n', ' ');
@@ -327,6 +338,54 @@ void Backend_NVIM::UpdateCommandBar()
     SetWindowTextW(m_hCommandBar, sWide.c_str());
     PositionCommandBar();
     ShowWindow(m_hCommandBar, SW_SHOWNOACTIVATE);
+    EnsureCaretVisible();
+}
+void Backend_NVIM::EnsureCaretVisible()
+{
+    if (!m_hCommandBar || m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument ||
+        !IsWindowVisible(m_hWindow))
+        return;
+    RECT sUsable{};
+    if (!GetClientRect(m_hWindow, &sUsable))
+        return;
+    if (IsWindowVisible(m_hCommandBar))
+    {
+        RECT sBar{};
+        RECT sOverlap{};
+        if (GetWindowRect(m_hCommandBar, &sBar))
+        {
+            MapWindowPoints(HWND_DESKTOP, m_hWindow, reinterpret_cast<POINT *>(&sBar), 2);
+            if (IntersectRect(&sOverlap, &sUsable, &sBar))
+            {
+                sUsable.bottom = sOverlap.top;
+                // Allow the last document row to move above the overlay too.
+                if (!m_bScrollPastEnd)
+                {
+                    m_bOriginalEndAtLastLine = m_sEditor.Send(Scintilla::GETENDATLASTLINE) != 0;
+                    (void)m_sEditor.Send(Scintilla::SETENDATLASTLINE, false);
+                    m_bScrollPastEnd = true;
+                }
+            }
+        }
+    }
+    const LRESULT nCaret  = m_sEditor.Caret();
+    const LRESULT nLine   = m_sEditor.Send(Scintilla::LINEFROMPOSITION, nCaret);
+    const LRESULT nHeight = m_sEditor.Send(Scintilla::TEXTHEIGHT, nLine);
+    // No scroll position can fit a complete row in a smaller text area.
+    if (nHeight <= 0 || sUsable.bottom - sUsable.top < nHeight)
+        return;
+    if (!m_sEditor.Send(Scintilla::GETLINEVISIBLE, nLine))
+        (void)m_sEditor.Send(Scintilla::ENSUREVISIBLE, nLine);
+    // Query the caret itself, rather than the start of its document line:
+    // a wrapped line can occupy several display rows.
+    const LRESULT nY    = m_sEditor.Send(Scintilla::POINTYFROMPOSITION, 0, nCaret);
+    LRESULT       nRows = 0;
+    if (nY < sUsable.top)
+        nRows = -((sUsable.top - nY + nHeight - 1) / nHeight);
+    else if (nY + nHeight > sUsable.bottom)
+        nRows = (nY + nHeight - sUsable.bottom + nHeight - 1) / nHeight;
+    if (nRows)
+        (void)m_sEditor.Send(Scintilla::LINESCROLL, 0, nRows);
 }
 bool Backend_NVIM::HandleNotification(const Value &sNotification)
 {
@@ -912,6 +971,7 @@ Backend_NVIM::SyncResult Backend_NVIM::SyncDocument(const Value &sResult)
             }
         }
     }
+    EnsureCaretVisible();
     m_sSession.nKnownCaret        = m_sEditor.Caret();
     // Never acknowledge stale, skipped or partially applied snapshots.
     m_sSession.nSyncedBuffer      = nBuffer;
@@ -1017,8 +1077,20 @@ bool Backend_NVIM::PollResponses()
 }
 BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM, UINT_PTR, DWORD_PTR)
 {
-    if (nMessage == WM_SIZE)
+    if (nMessage == CaretVisibilityMessage)
+    {
         PositionCommandBar();
+        // Scintilla may defer rewrapping after a resize/zoom until painting.
+        UpdateWindow(hWindow);
+        EnsureCaretVisible();
+        return TRUE;
+    }
+    // The subclass runs before Scintilla handles layout/zoom. Check the final
+    // geometry on the next message, without interfering with ordinary scrolling.
+    if (nMessage == WM_SIZE || nMessage == WM_SETFONT || nMessage == Scintilla::SETZOOM ||
+        nMessage == Scintilla::ZOOMIN || nMessage == Scintilla::ZOOMOUT ||
+        (nMessage == WM_MOUSEWHEEL && (GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL)))
+        PostMessageW(hWindow, CaretVisibilityMessage, 0, 0);
     if (nMessage == WM_TIMER && wParam == m_sSession.nTimer && m_sSession.nTimer)
     {
         if (!PollResponses())

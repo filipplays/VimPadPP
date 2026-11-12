@@ -171,7 +171,59 @@ int main()
         bOk = false;
     }
     SendKey(27);
+    // The command bar must not cover a search result, even on the last row.
+    ShowWindow(hEditor, SW_SHOWNOACTIVATE);
+    std::string sSearchText;
+    for (int nLine = 0; nLine < 200; ++nLine)
+        sSearchText += "ordinary line\r\n";
+    sSearchText += std::string(300, 'x') + " needle";
+    SendMessageW(hEditor, Scintilla::SETTEXT, 0, reinterpret_cast<LPARAM>(sSearchText.c_str()));
+    constexpr UINT SetWrapMode = 2268;
+    SendMessageW(hEditor, SetWrapMode, 1, 0);
+    SendMessageW(hEditor, Scintilla::GOTOPOS, 0, 0);
+    const LRESULT nOriginalEndAtLastLine = SendMessageW(hEditor, Scintilla::GETENDATLASTLINE, 0, 0);
+    SendKey('/');
+    for (char cKey : std::string("needle"))
+        SendKey(cKey);
+    SendKey('\r');
+    auto CheckCaretVisible = [&](const char *pLabel)
+    {
+        const LRESULT nCaret  = SendMessageW(hEditor, Scintilla::GETCURRENTPOS, 0, 0);
+        const LRESULT nLine   = SendMessageW(hEditor, Scintilla::LINEFROMPOSITION, nCaret, 0);
+        const LRESULT nY      = SendMessageW(hEditor, Scintilla::POINTYFROMPOSITION, 0, nCaret);
+        const LRESULT nHeight = SendMessageW(hEditor, Scintilla::TEXTHEIGHT, nLine, 0);
+        RECT          sUsable{};
+        GetClientRect(hEditor, &sUsable);
+        HWND hBar = FindWindowExW(hEditor, nullptr, L"STATIC", nullptr);
+        if (hBar && IsWindowVisible(hBar))
+        {
+            RECT sBar{};
+            GetWindowRect(hBar, &sBar);
+            MapWindowPoints(HWND_DESKTOP, hEditor, reinterpret_cast<POINT *>(&sBar), 2);
+            sUsable.bottom = sBar.top;
+        }
+        if (nCaret != static_cast<LRESULT>(sSearchText.size() - 6) || nY < 0 || nY + nHeight > sUsable.bottom)
+        {
+            std::cerr << pLabel << ": caret=" << nCaret << " y=" << nY << " height=" << nHeight
+                      << " usable bottom=" << sUsable.bottom << '\n';
+            return false;
+        }
+        return true;
+    };
+    bOk = CheckCaretVisible("wrapped search at document end") && bOk;
+    SendMessageW(hEditor, Scintilla::SETZOOM, 6, 0);
+    SetWindowPos(hEditor, nullptr, 0, 0, 320, 180, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    // Pump the posted layout check without issuing another editing command.
+    MSG sLayoutMessage{};
+    while (PeekMessageW(&sLayoutMessage, nullptr, 0, 0, PM_REMOVE))
+        DispatchMessageW(&sLayoutMessage);
+    bOk = CheckCaretVisible("zoom and resize") && bOk;
     bOk = pUninstall(hEditor) && bOk;
+    if (SendMessageW(hEditor, Scintilla::GETENDATLASTLINE, 0, 0) != nOriginalEndAtLastLine)
+    {
+        std::cerr << "Uninstall did not restore scrolling policy\n";
+        bOk = false;
+    }
     DestroyWindow(hEditor);
     FreeLibrary(hPlugin);
     FreeLibrary(hScintilla);

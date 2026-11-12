@@ -24,7 +24,8 @@ class Backend_NVIM : public Backend
     BOOL bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) override;
 
   private:
-    static constexpr UINT_PTR NeovimResponseTimerId = 0x4E56494D;
+    static constexpr UINT_PTR NeovimResponseTimerId  = 0x4E56494D;
+    static constexpr UINT     CaretVisibilityMessage = WM_APP + 0x4E56;
     enum class Mode : char
     {
         Normal          = 'n',
@@ -84,11 +85,13 @@ class Backend_NVIM : public Backend
     std::string m_sCommandPrefix;
     std::string m_sCommandText;
     std::string m_sMessage;
-    size_t      m_nCommandPosition     = 0;
-    bool        m_bCommandVisible      = false;
-    int         m_nSuppressedChar      = -1;
-    LRESULT     m_nOriginalCaretStyle  = 0;
-    LRESULT     m_nOriginalCaretPeriod = 0;
+    size_t      m_nCommandPosition       = 0;
+    bool        m_bCommandVisible        = false;
+    int         m_nSuppressedChar        = -1;
+    LRESULT     m_nOriginalCaretStyle    = 0;
+    LRESULT     m_nOriginalCaretPeriod   = 0;
+    bool        m_bScrollPastEnd         = false;
+    bool        m_bOriginalEndAtLastLine = true;
     void        CloseHandleAndReset(HANDLE &hHandle);
     void        StopNeovimProcess();
     void        AppendBigEndianBytes(std::string &sData, uint64_t nValue, int nBytes);
@@ -105,6 +108,7 @@ class Backend_NVIM : public Backend
     bool HandleNotification(const Value &sNotification);
     void UpdateCommandBar();
     void PositionCommandBar();
+    void EnsureCaretVisible();
     std::string BuildStateArguments(bool bAcceptCurrent = false);
     bool        RequestNeovimState();
     bool        SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT nColumn);
