@@ -40,6 +40,13 @@ For `runscintilla`, `RUN_SCINTILLA_APP` selects the executable; its default is
 the native host in the selected build directory. `stagenvim` copies the Neovim
 distribution into the Neovim build directory.
 
+Both staging and installation preserve existing `neovim/init.lua`,
+`neovim/init.vim`, and `neovim/vim-motions-init.lua`. Missing init files are
+copied on first setup; other distribution files are updated normally.
+To update the bundled bootstrap deliberately, copy `src/neovim_init.lua` to
+the desired `neovim/vim-motions-init.lua` yourself. The separate `config/`
+directory is not copied or overwritten by these targets.
+
 The install targets write to `NOTEPADPP_PLUGIN_DIR`; `runnotepad` uses
 `NOTEPADPP_EXE`. Override either path as needed:
 

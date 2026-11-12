@@ -130,15 +130,12 @@ $(NVIM_PLUGIN_DLL): src/notepadpp_plugin.cpp $(CORE_SOURCES_NEOVIM) $(CORE_HEADE
 installnvim: nvim
 	mkdir -p "$(NOTEPADPP_PLUGIN_DIR)"
 	cp "$(NVIM_PLUGIN_DLL)" "$(NOTEPADPP_PLUGIN_DIR)/"
-	mkdir -p "$(NOTEPADPP_PLUGIN_DIR)/neovim"
-	cp -R "$(NVIM_BUILD_DIR)/neovim/." "$(NOTEPADPP_PLUGIN_DIR)/neovim/"
+	python3 copy_neovim.py "$(NVIM_BUILD_DIR)/neovim" "$(NOTEPADPP_PLUGIN_DIR)/neovim"
 
 # Targeting standalone Scintilla
 stagenvim: | $(NVIM_BUILD_DIR)
 	@test -f "$(NEOVIM_DIR)/bin/nvim.exe" || (echo "Missing $(NEOVIM_DIR)/bin/nvim.exe." >&2; exit 1)
-	mkdir -p "$(NVIM_BUILD_DIR)/neovim"
-	cp -R "$(NEOVIM_DIR)/." "$(NVIM_BUILD_DIR)/neovim/"
-	cp src/neovim_init.lua "$(NVIM_BUILD_DIR)/neovim/vim-motions-init.lua"
+	python3 copy_neovim.py "$(NEOVIM_DIR)" "$(NVIM_BUILD_DIR)/neovim" --bootstrap src/neovim_init.lua
 
 # Shared host and Scintilla dependencies.
 $(APP): HOST_FLAGS := $(CXXFLAGS_NATIVE)
