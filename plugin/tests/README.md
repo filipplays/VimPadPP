@@ -137,3 +137,45 @@ and history release, undo/redo, multiple changes between requests, buffer
 switches, reloads, retention limits, and the baseline after a host text push.
 Generated Lua scripts stay in the system temporary directory. These checks do
 not exercise the Windows pipe transport or Scintilla application path.
+
+## Plugin configuration and host shortcuts
+
+Run the actual Lua config-loader checks from the repository root:
+
+```sh
+python3 plugin/tests/neovim/plugin_config_test.py
+```
+
+This requires local Neovim (`--nvim` overrides its path) and writes only to a
+system temporary directory. It checks missing files, empty/default settings,
+changed settings, invalid Lua, unknown options, invalid list types and sparse
+lists. Key-name parsing is checked separately by the Windows test below.
+
+Compile the focused Windows checks from `plugin/`, putting outputs in an
+isolated temporary directory:
+
+```sh
+x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic \
+  -Isrc/backends/common tests/neovim/host_key_test.cpp \
+  -o /private/tmp/HostKeyTests.exe -static -static-libgcc -static-libstdc++
+wine /private/tmp/HostKeyTests.exe
+
+x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic \
+  -Isrc/backends/common tests/neovim/passthrough_test.cpp \
+  -o /private/tmp/PassthroughTests.exe -lcomctl32 -static -static-libgcc -static-libstdc++
+```
+
+Run `PassthroughTests.exe` in an isolated directory containing the built Neovim
+`VimMotions.dll`, `Scintilla.dll`, and the staged `neovim/` distribution with
+`vim-motions-init.lua`. Add `config/vimpad.lua` there with:
+
+```lua
+return {passthrough_keys = {"<C-s>", "<C-Tab>", "<C-S-Tab>"}}
+```
+
+The integration test creates a host window with accelerator bindings. It checks
+that configured shortcuts reach the host, saving sees pending edits, extra
+modifiers do not match, Ctrl+V still belongs to Neovim, and translated
+characters pass through even after Ctrl is released. It also checks that
+subsequent ordinary input returns to Neovim. The test does not load Notepad++
+or verify its actual tab switching, menu commands, or two-view lifecycle.

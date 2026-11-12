@@ -18,14 +18,26 @@ LRESULT CALLBACK Manager::KeyboardMessageHook(int nCode, WPARAM wParam, LPARAM l
                      (pMessage->wParam >= VK_F1 && pMessage->wParam <= VK_F12) || pMessage->wParam == VK_INSERT ||
                      pMessage->wParam == VK_DELETE || pMessage->wParam == VK_RETURN || pMessage->wParam == VK_BACK ||
                      pMessage->wParam == VK_TAB || pMessage->wParam == VK_SPACE);
-    if (nCode >= 0 && wParam == PM_REMOVE && pManager && pMessage && pMessage->message == WM_KEYDOWN &&
-        pMessage->hwnd == GetFocus() && pManager->m_aSessions.contains(pMessage->hwnd) &&
-        (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) && bHandledControlKey)
+    if (nCode >= 0 && wParam == PM_REMOVE && pManager && pMessage &&
+        (pMessage->message == WM_KEYDOWN || pMessage->message == WM_SYSKEYDOWN) && pMessage->hwnd == GetFocus() &&
+        pManager->m_aSessions.contains(pMessage->hwnd))
     {
-        // Intercept before the host translates its accelerator table. The backend
-        // handles this keydown directly, so no translated WM_CHAR is needed.
-        SendMessageW(pMessage->hwnd, pMessage->message, pMessage->wParam, pMessage->lParam);
-        pMessage->message = WM_NULL;
+        auto &pSession = pManager->m_aSessions.at(pMessage->hwnd);
+        if (pSession->PassesKeyToHost(pMessage->wParam))
+        {
+            // Apply pending edits before the host saves or changes documents.
+            if (!pSession->PrepareHostKey())
+                pMessage->message = WM_NULL;
+        }
+        else if (
+            pMessage->message == WM_KEYDOWN && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
+            bHandledControlKey)
+        {
+            // Intercept before the host translates its accelerator table. The backend
+            // handles this keydown directly, so no translated WM_CHAR is needed.
+            SendMessageW(pMessage->hwnd, pMessage->message, pMessage->wParam, pMessage->lParam);
+            pMessage->message = WM_NULL;
+        }
     }
     return CallNextHookEx(pManager ? pManager->m_hKeyboardHook : nullptr, nCode, wParam, lParam);
 }

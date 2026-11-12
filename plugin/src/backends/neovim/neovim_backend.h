@@ -2,6 +2,7 @@
 
 #include "../common/backend_common.h"
 #include "../common/editor_text.h"
+#include "../common/host_key.h"
 #include "line_update.h"
 #include "msgpack_frame.h"
 
@@ -20,6 +21,8 @@ class Backend_NVIM : public Backend
     BOOL Install() override;
     BOOL Uninstall() override;
     void OnCaretMoved(LRESULT nPosition) override;
+    bool PassesKeyToHost(WPARAM nKey) const override;
+    bool PrepareHostKey() override;
 
     BOOL bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) override;
 
@@ -80,28 +83,32 @@ class Backend_NVIM : public Backend
     };
     Session    m_sSession;
     EditorText m_sEditor;
-    void (*m_pSaveHandler)(HWND) = nullptr;
-    HWND        m_hCommandBar    = nullptr;
-    std::string m_sCommandPrefix;
-    std::string m_sCommandText;
-    std::string m_sMessage;
-    size_t      m_nCommandPosition       = 0;
-    bool        m_bCommandVisible        = false;
-    int         m_nSuppressedChar        = -1;
-    LRESULT     m_nOriginalCaretStyle    = 0;
-    LRESULT     m_nOriginalCaretPeriod   = 0;
-    bool        m_bScrollPastEnd         = false;
-    bool        m_bOriginalEndAtLastLine = true;
-    void        CloseHandleAndReset(HANDLE &hHandle);
-    void        StopNeovimProcess();
-    void        AppendBigEndianBytes(std::string &sData, uint64_t nValue, int nBytes);
-    void        AppendMsgPackString(std::string &sData, const std::string &sValue);
-    bool        ReadBytes(void *pData, size_t nSize);
-    bool        ReadBigEndianInteger(int nBytes, uint64_t &nValue);
-    bool        DecodeMsgPackValue(Value &sValue, int nDepth = 0);
-    void        AppendMsgPackArrayHeader(std::string &sData, size_t nSize);
-    void        AppendMsgPackInteger(std::string &sData, int64_t nValue);
-    void        AppendMsgPackBoolean(std::string &sData, bool bValue);
+    void (*m_pSaveHandler)(HWND)       = nullptr;
+    HWND                 m_hCommandBar = nullptr;
+    std::string          m_sCommandPrefix;
+    std::string          m_sCommandText;
+    std::string          m_sMessage;
+    size_t               m_nCommandPosition = 0;
+    bool                 m_bCommandVisible  = false;
+    int                  m_nSuppressedChar  = -1;
+    bool                 m_bPassThroughKey  = false;
+    LPARAM               m_nPassThroughScan = 0;
+    std::string          m_sPluginConfigPath;
+    std::vector<HostKey> m_aPassThroughKeys;
+    LRESULT              m_nOriginalCaretStyle    = 0;
+    LRESULT              m_nOriginalCaretPeriod   = 0;
+    bool                 m_bScrollPastEnd         = false;
+    bool                 m_bOriginalEndAtLastLine = true;
+    void                 CloseHandleAndReset(HANDLE &hHandle);
+    void                 StopNeovimProcess();
+    void                 AppendBigEndianBytes(std::string &sData, uint64_t nValue, int nBytes);
+    void                 AppendMsgPackString(std::string &sData, const std::string &sValue);
+    bool                 ReadBytes(void *pData, size_t nSize);
+    bool                 ReadBigEndianInteger(int nBytes, uint64_t &nValue);
+    bool                 DecodeMsgPackValue(Value &sValue, int nDepth = 0);
+    void                 AppendMsgPackArrayHeader(std::string &sData, size_t nSize);
+    void                 AppendMsgPackInteger(std::string &sData, int64_t nValue);
+    void                 AppendMsgPackBoolean(std::string &sData, bool bValue);
     bool SendRpc(const std::string &sMethod, const std::string &sArguments, unsigned &nId, bool bNotification = false);
     bool CallRpcAndWait(const std::string &sMethod, const std::string &sArguments, Value &sResult);
     bool AttachUi();
@@ -122,6 +129,7 @@ class Backend_NVIM : public Backend
     void        InvalidateSyncedRevision();
     bool        ApplyTextReplacement(size_t nStart, size_t nEnd, const std::string &sText);
     bool        StartNeovimProcess();
+    bool        LoadPluginConfig();
     void        StopAndReportError(const wchar_t *pMessage);
     SyncResult  SyncDocument(const Value &sResult);
     bool        PollResponses();

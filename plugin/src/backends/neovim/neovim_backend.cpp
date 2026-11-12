@@ -759,6 +759,15 @@ bool Backend_NVIM::StartNeovimProcess()
     size_t       nSlash = sPath.find_last_of(L"\\/");
     if (nSlash == std::wstring::npos)
         return false;
+    std::wstring sConfigPath  = sPath.substr(0, nSlash) + L"\\config\\vimpad.lua";
+    int          nConfigBytes = WideCharToMultiByte(
+        CP_UTF8, 0, sConfigPath.data(), static_cast<int>(sConfigPath.size()), nullptr, 0, nullptr, nullptr);
+    if (nConfigBytes <= 0)
+        return false;
+    m_sPluginConfigPath.resize(nConfigBytes);
+    WideCharToMultiByte(
+        CP_UTF8, 0, sConfigPath.data(), static_cast<int>(sConfigPath.size()), m_sPluginConfigPath.data(), nConfigBytes,
+        nullptr, nullptr);
     std::wstring sNeovimDir = sPath.substr(0, nSlash) + L"\\neovim";
     sPath                   = sNeovimDir + L"\\bin\\nvim.exe";
     SECURITY_ATTRIBUTES sSecurity{sizeof(sSecurity), nullptr, TRUE};
@@ -1075,8 +1084,116 @@ bool Backend_NVIM::PollResponses()
     }
     return true;
 }
-BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM, UINT_PTR, DWORD_PTR)
+bool Backend_NVIM::PassesKeyToHost(WPARAM nKey) const
 {
+    return std::any_of(
+        m_aPassThroughKeys.begin(), m_aPassThroughKeys.end(),
+        [nKey](const HostKey &sKey) { return sKey.Matches(nKey); });
+}
+
+bool Backend_NVIM::PrepareHostKey()
+{
+    if (m_sSession.bFailed)
+        return true;
+    const ULONGLONG nDeadline = GetTickCount64() + 5000;
+    while (m_sSession.nStateId || m_sSession.nCaretId)
+    {
+        if (GetTickCount64() >= nDeadline || !PollResponses())
+        {
+            StopAndReportError(L"Could not apply pending Neovim edits before passing a shortcut to the host.");
+            return false;
+        }
+        if (m_sSession.nStateId || m_sSession.nCaretId)
+            Sleep(1);
+    }
+    return true;
+}
+
+bool Backend_NVIM::LoadPluginConfig()
+{
+    // Evaluate a separate returned table; no plugin settings are put in init.lua.
+    static constexpr char PluginConfigLua[] = R"lua(
+local sPath = ...
+local bOk, aResult = xpcall(function()
+  local _, sStatError, nStatError = vim.uv.fs_stat(sPath)
+  if nStatError == 'ENOENT' then return {} end
+  if sStatError then error(sStatError) end
+  local tConfig = dofile(sPath)
+  if type(tConfig) ~= 'table' then error('vimpad.lua must return a table') end
+  for sName in pairs(tConfig) do
+    if sName ~= 'passthrough_keys' then error('Unknown setting: ' .. tostring(sName)) end
+  end
+  local aKeys = tConfig.passthrough_keys
+  if aKeys == nil then return {} end
+  if type(aKeys) ~= 'table' then error('passthrough_keys must be a list of key strings') end
+  local nCount = 0
+  for nIndex, sKey in pairs(aKeys) do
+    if type(nIndex) ~= 'number' or nIndex < 1 or nIndex % 1 ~= 0 or type(sKey) ~= 'string' then
+      error('passthrough_keys must be a list of key strings')
+    end
+    nCount = nCount + 1
+  end
+  for nIndex = 1, nCount do
+    if aKeys[nIndex] == nil then error('passthrough_keys must not have gaps') end
+  end
+  return aKeys
+end, debug.traceback)
+return {bOk and '' or tostring(aResult), bOk and aResult or {}}
+)lua";
+    std::string           sArgs;
+    AppendMsgPackArrayHeader(sArgs, 2);
+    AppendMsgPackString(sArgs, PluginConfigLua);
+    AppendMsgPackArrayHeader(sArgs, 1);
+    AppendMsgPackString(sArgs, m_sPluginConfigPath);
+    Value sConfig;
+    if (!CallRpcAndWait("nvim_exec_lua", sArgs, sConfig) || sConfig.nType != 3 || sConfig.aItems.size() != 2 ||
+        sConfig.aItems[0].nType != 2 || sConfig.aItems[1].nType != 3)
+    {
+        StopAndReportError(L"Could not read config\\vimpad.lua.");
+        return false;
+    }
+    std::string          sError = sConfig.aItems[0].sString;
+    std::vector<HostKey> aKeys;
+    if (sError.empty())
+        for (const auto &sValue : sConfig.aItems[1].aItems)
+        {
+            HostKey sKey;
+            if (sValue.nType != 2 || !HostKey::Parse(sValue.sString, sKey))
+            {
+                sError = "Invalid passthrough key: " + sValue.sString;
+                break;
+            }
+            aKeys.push_back(sKey);
+        }
+    if (!sError.empty())
+    {
+        int nSize = MultiByteToWideChar(CP_UTF8, 0, sError.data(), static_cast<int>(sError.size()), nullptr, 0);
+        std::wstring sDetail(nSize, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, sError.data(), static_cast<int>(sError.size()), sDetail.data(), nSize);
+        StopAndReportError((L"VimPad++ configuration failed (config\\vimpad.lua):\n\n" + sDetail).c_str());
+        return false;
+    }
+    m_aPassThroughKeys = std::move(aKeys);
+    return true;
+}
+
+BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
+{
+    if (nMessage == WM_KILLFOCUS)
+        m_bPassThroughKey = false;
+    if (nMessage == WM_KEYDOWN || nMessage == WM_SYSKEYDOWN)
+    {
+        m_bPassThroughKey  = PassesKeyToHost(wParam);
+        m_nPassThroughScan = lParam & 0x00ff0000;
+        if (m_bPassThroughKey)
+        {
+            m_nSuppressedChar = -1;
+            return PrepareHostKey() ? FALSE : TRUE;
+        }
+    }
+    if ((nMessage == WM_CHAR || nMessage == WM_SYSCHAR) && m_bPassThroughKey &&
+        (lParam & 0x00ff0000) == m_nPassThroughScan)
+        return FALSE;
     if (nMessage == CaretVisibilityMessage)
     {
         PositionCommandBar();
@@ -1335,6 +1452,8 @@ BOOL Backend_NVIM::Install()
         StopAndReportError(sMessage.c_str());
         return FALSE;
     }
+    if (!LoadPluginConfig())
+        return FALSE;
     LRESULT nPosition      = m_sEditor.Caret();
     m_sSession.nKnownCaret = nPosition;
     LRESULT nLine          = m_sEditor.Send(Scintilla::LINEFROMPOSITION, nPosition);

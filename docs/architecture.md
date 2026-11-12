@@ -46,6 +46,18 @@ after pending state has been applied. Normal response polling uses a timer;
 startup and authoritative host-to-Neovim synchronization also make blocking
 RPC calls, whose pipe reads have a five-second timeout.
 
+The Neovim backend separately evaluates `config/vimpad.lua` through its existing
+Lua RPC connection at installation. This returned table holds plugin settings;
+`init.lua` and `init.vim` remain ordinary Neovim configuration. A missing plugin
+config uses empty defaults. Invalid settings fail installation with an error.
+The shared manager's message hook checks each session's configured physical
+shortcuts before intercepting Ctrl accelerators. Configured shortcuts first
+drain pending state/caret replies (with a five-second timeout), then continue
+through the host accelerator path. The backend also passes their keydown and
+translated character messages through to Scintilla when no accelerator claims
+them. Refresh recreates both sessions, reloading both configurations. The native
+backend currently has no plugin-config loader.
+
 The Neovim state helper is installed during authoritative host-to-Neovim
 synchronization. Per-key requests invoke it with the last applied buffer,
 `changedtick`, journal epoch, and edit sequence. The nine-field result is

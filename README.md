@@ -70,6 +70,47 @@ installing, run `make -C plugin nvim`; its output is under
 `make -C plugin native` and installed with `make -C plugin installnative`.
 See [the command guide](plugin/makefile-commands.md) for test and run targets.
 
+Staging and installation copy init files only when missing. Existing
+`neovim/init.lua`, `neovim/init.vim`, and `neovim/vim-motions-init.lua` are
+preserved, along with your separate `config/` directory. Other Neovim
+distribution files still update. Bootstrap changes must be copied manually
+when desired.
+
+## VimPad++ configuration
+
+For the Neovim backend, plugin settings live in `config/vimpad.lua` beside the
+plugin DLL, separate from your usual Neovim configuration. Use **Open VimPad++
+config** to create or open it. The file returns a Lua table:
+
+```lua
+return {
+  passthrough_keys = {
+    "<C-s>",
+    "<C-Tab>",
+    "<C-S-Tab>",
+  },
+}
+```
+
+These shortcuts pass to Notepad++ in every Vim mode, without being sent to
+Neovim. Notepad++ must have the corresponding shortcuts assigned. Pending
+Neovim edits are applied before a shortcut reaches the host, so saving includes
+your latest input. Other shortcuts continue to use the existing Vim handling.
+
+Keys use angle brackets with optional `C-`, `S-`, and `A-` modifiers for Ctrl,
+Shift, and Alt. Names are case insensitive and modifiers must match exactly:
+`<C-s>` does not include Ctrl+Shift+S. Supported keys are letters A–Z, digits
+0–9, F1–F24, Tab, Space, CR/Enter, BS/Backspace, Esc, Left, Right, Up, Down,
+Home, End, PageUp, PageDown, Insert, and Del/Delete. These are individual
+physical shortcuts, not Vim mappings or multi-key sequences.
+
+The file is read at startup and by **Reload VimPad++ and Neovim configs**.
+Save config edits before reloading. A missing file or omitted
+`passthrough_keys` means no shortcuts pass through; invalid settings or key
+names report an error and prevent Vim from being enabled. Reload recreates
+both Neovim sessions and therefore resets their transient state. The native
+backend does not currently load this configuration.
+
 ## Neovim configuration
 
 The committed `plugin/src/neovim_init.lua` is copied to
@@ -77,14 +118,16 @@ The committed `plugin/src/neovim_init.lua` is copied to
 `neovim/init.lua` from the staged distribution if present, then loads one
 optional user file from the plugin's `config/` directory: `init.lua` or
 `init.vim`. Having both user files is an error. It also adds `config/` and
-`config/after/` to Neovim's runtime path. The plugin menu has commands to open
-the config, open its folder, and reload it. Configuration and plugins may
+`config/after/` to Neovim's runtime path. **Open Neovim config** opens
+`neovim/init.lua`, creating it only if missing. **Open VimPad++ config** opens
+`config/vimpad.lua`, and **Open config folder** opens `config/`. Existing
+`config/init.lua` or `config/init.vim` files still load after `neovim/init.lua`
+and can override its settings. Configuration and plugins may
 behave differently from a normal Neovim UI; test them in this integration.
 
-For example, the following mirrors the settings in an installed
-`neovim/init.lua`. Put them in the plugin's `config/init.lua` (beside its
-`neovim/` folder) and use **Reload Neovim config** from the plugin menu. This
-keeps personal settings separate from the Neovim files copied during install:
+For example, put the following in the plugin's `neovim/init.lua` and use
+**Reload VimPad++ and Neovim configs** from the plugin menu. Installation
+preserves this file:
 
 ```lua
 vim.opt.hlsearch = false
@@ -109,7 +152,9 @@ vim.keymap.set('i', '<C-s>', '<Esc><cmd>w<cr>a', { noremap = true, silent = true
 The Ctrl+V mappings replace Neovim's usual Ctrl+V entry into Visual Block
 mode. Remove those two mappings if you use Visual Block selection. The plugin
 handles `:w` by asking Notepad++ to save the active document, so the Ctrl+S
-mappings above use the same save path.
+mappings above use the same save path. If `<C-s>` is listed in `vimpad.lua`,
+Notepad++ handles that shortcut directly and these mappings are bypassed;
+`:w` continues to use the save notification.
 
 ## Known limitations
 

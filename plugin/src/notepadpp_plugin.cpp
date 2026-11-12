@@ -99,7 +99,7 @@ void ToggleViews()
 #if !defined(ENABLE_NATIVE_BACKEND)
 void ModuleAnchor() {}
 
-std::wstring ConfigDirectory()
+std::wstring ConfigDirectory(const wchar_t *pFolder = L"config")
 {
     HMODULE hModule = nullptr;
     if (!GetModuleHandleExW(
@@ -112,7 +112,7 @@ std::wstring ConfigDirectory()
         return {};
     std::wstring sPath(aPath, nLength);
     size_t       nSlash = sPath.find_last_of(L"\\/");
-    return nSlash == std::wstring::npos ? std::wstring{} : sPath.substr(0, nSlash) + L"\\config";
+    return nSlash == std::wstring::npos ? std::wstring{} : sPath.substr(0, nSlash) + L"\\" + pFolder;
 }
 
 bool EnsureConfigDirectory(const std::wstring &sDirectory)
@@ -136,9 +136,8 @@ void OpenConfigFolder()
             MB_OK | MB_ICONERROR);
 }
 
-void OpenConfig()
+void OpenOrCreateConfig(const std::wstring &sDirectory, const std::wstring &sName, const char *pStarter)
 {
-    std::wstring sDirectory = ConfigDirectory();
     if (!EnsureConfigDirectory(sDirectory))
     {
         MessageBoxW(
@@ -146,29 +145,19 @@ void OpenConfig()
             MB_OK | MB_ICONERROR);
         return;
     }
-    std::wstring sLua = sDirectory + L"\\init.lua";
-    std::wstring sVim = sDirectory + L"\\init.vim";
-    bool         bLua = GetFileAttributesW(sLua.c_str()) != INVALID_FILE_ATTRIBUTES;
-    bool         bVim = GetFileAttributesW(sVim.c_str()) != INVALID_FILE_ATTRIBUTES;
-    if (bLua && bVim)
+    std::wstring sFile = sDirectory + L"\\" + sName;
+    if (GetFileAttributesW(sFile.c_str()) == INVALID_FILE_ATTRIBUTES)
     {
-        MessageBoxW(
-            g_sNpp.hNotepad, L"Both init.lua and init.vim exist. Remove or rename one before reloading.", PluginName,
-            MB_OK | MB_ICONERROR);
-        return;
-    }
-    if (!bLua && !bVim)
-    {
-        HANDLE hFile = CreateFileW(sLua.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        HANDLE hFile =
+            CreateFileW(sFile.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (hFile == INVALID_HANDLE_VALUE)
         {
-            MessageBoxW(g_sNpp.hNotepad, (L"Could not create " + sLua).c_str(), PluginName, MB_OK | MB_ICONERROR);
+            MessageBoxW(g_sNpp.hNotepad, (L"Could not create " + sFile).c_str(), PluginName, MB_OK | MB_ICONERROR);
             return;
         }
-        const char aStarter[] = "-- Add your Neovim settings and mappings here.\r\n";
-        DWORD      nWritten   = 0;
-        bool       bWritten =
-            WriteFile(hFile, aStarter, sizeof(aStarter) - 1, &nWritten, nullptr) && nWritten == sizeof(aStarter) - 1;
+        DWORD nSize    = static_cast<DWORD>(lstrlenA(pStarter));
+        DWORD nWritten = 0;
+        bool  bWritten = WriteFile(hFile, pStarter, nSize, &nWritten, nullptr) && nWritten == nSize;
         CloseHandle(hFile);
         if (!bWritten)
         {
@@ -176,9 +165,26 @@ void OpenConfig()
             return;
         }
     }
-    const std::wstring &sFile = bVim ? sVim : sLua;
     if (!SendMessageW(g_sNpp.hNotepad, NPPM_DOOPEN, 0, reinterpret_cast<LPARAM>(sFile.c_str())))
         MessageBoxW(g_sNpp.hNotepad, (L"Could not open " + sFile).c_str(), PluginName, MB_OK | MB_ICONERROR);
+}
+
+void OpenPluginConfig()
+{
+    OpenOrCreateConfig(
+        ConfigDirectory(), L"vimpad.lua",
+        "-- VimPad++ settings. Neovim settings belong in neovim/init.lua.\r\n"
+        "return {\r\n"
+        "  passthrough_keys = {\r\n"
+        "    -- Uncomment to let Notepad++ handle these shortcuts:\r\n"
+        "    -- \"<C-s>\", \"<C-Tab>\", \"<C-S-Tab>\",\r\n"
+        "  },\r\n"
+        "}\r\n");
+}
+
+void OpenConfig()
+{
+    OpenOrCreateConfig(ConfigDirectory(L"neovim"), L"init.lua", "-- Add your Neovim settings and mappings here.\r\n");
 }
 
 void ReloadConfig()
@@ -190,7 +196,8 @@ void ReloadConfig()
         DetachViews();
     if (bLoaded)
         MessageBoxW(
-            g_sNpp.hNotepad, L"Neovim configuration reloaded successfully.", PluginName, MB_OK | MB_ICONINFORMATION);
+            g_sNpp.hNotepad, L"VimPad++ and Neovim configurations reloaded successfully.", PluginName,
+            MB_OK | MB_ICONINFORMATION);
 }
 #endif
 
@@ -198,8 +205,9 @@ FuncItem g_aFunctions[] = {
     {L"Enable VimPad++", ToggleViews, 0, false, nullptr},
 #if !defined(ENABLE_NATIVE_BACKEND)
     {L"Open Neovim config", OpenConfig, 0, false, nullptr},
-    {L"Open Neovim config folder", OpenConfigFolder, 0, false, nullptr},
-    {L"Reload Neovim config", ReloadConfig, 0, false, nullptr},
+    {L"Open VimPad++ config", OpenPluginConfig, 0, false, nullptr},
+    {L"Open config folder", OpenConfigFolder, 0, false, nullptr},
+    {L"Reload VimPad++ and Neovim configs", ReloadConfig, 0, false, nullptr},
 #endif
 };
 
