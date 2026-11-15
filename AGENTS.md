@@ -11,10 +11,19 @@ instructions and the user's explicit authorization requirements.
 
 Build and test targets are documented in
 [plugin/makefile-commands.md](plugin/makefile-commands.md). From the repository
-root they can be invoked with `make -C plugin <target>`. Builds and tests write
+root use `make -C plugin <target>` consistently. Builds and tests write
 files: in particular, functional test targets format all JSON fixtures, and
-fuzzing replaces its temporary output and may remove `.nvimlog`. Obtain any
-authorization required by the global instructions before running them.
+fuzzing replaces its temporary output and may remove `.nvimlog`.
+
+As a project-specific exception to the global command-approval instructions,
+once implementation is explicitly authorized, run relevant documented builds,
+tests, fuzzing, and Wine test runners without asking again. This authorization
+includes their documented fixture formatting, generated outputs, temporary-output
+replacement, `.nvimlog` removal, and Wine runtime writes. Prefer running Wine
+through the documented make targets. Discussion alone does not authorize
+implementation. Installing into Notepad++ still requires an explicit request.
+This authorization does not bypass sandbox restrictions or execution approval
+rules; request execution approval when the environment requires it.
 
 Running clang-format on C/C++ files edited for an authorized task does not
 require separate permission, including when the formatter writes those files.
