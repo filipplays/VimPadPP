@@ -62,7 +62,7 @@ The Neovim state helper is installed during authoritative host-to-Neovim
 synchronization. Per-key requests invoke it with the last applied buffer,
 `changedtick`, journal epoch, and edit sequence. The nine-field result is
 `[buffer, changedtick, epoch, base-sequence, sequence, kind, payload, cursor,
-[mode, visual-anchor]]`. Kind 0 omits text, kind 1 carries a full line snapshot,
+[mode, visual-anchor, selection-option]]`. Kind 0 omits text, kind 1 carries a full line snapshot,
 and kind 2 carries ordered `[sequence, first-line, last-line, replacement-lines]`
 updates. Line ranges are zero-based and end-exclusive; `[-1, -1, []]` marks a
 sequence entry where only `changedtick` advanced.
@@ -91,6 +91,17 @@ cursor/selection state are applied, or after authoritative Scintilla text is
 successfully pushed to Neovim. Stale and skipped responses do not advance it;
 a mismatched delta baseline requests a full snapshot. The host's input revision
 counters remain separate and continue to reject outdated state replies.
+
+Ordinary mouse selections are owned by Scintilla until button release or loss
+of mouse capture. The backend drains pending edits before the gesture, ignores
+caret notifications generated during it, and rejects state replies that could
+restore an older selection. It samples the final anchor and caret after
+Scintilla processes the mouse message, including in the standalone host.
+A nonempty range becomes characterwise Visual mode through a Lua RPC;
+subsequent keys wait for this operation to finish. Conversion preserves drag
+direction and accounts for Neovim's inclusive/exclusive selection option and
+Scintilla's half-open byte positions. Rectangular and multiple selections are
+outside this path. An empty click preserves Insert mode or exits Visual mode.
 
 Incoming asynchronous RPC bytes pass through a persistent MessagePack frame
 scanner before value decoding. It preserves progress across pipe chunks and

@@ -529,7 +529,7 @@ local function snapshot(nKnownBuffer, nKnownTick, nKnownEpoch, nKnownSequence, b
   end
   sJournal.aCheckpoints[sJournal.nSequence] = nTick
   return {nBuffer, nTick, sJournal.nEpoch, nBaseSequence, sJournal.nSequence, nKind, aPayload,
-          vim.api.nvim_win_get_cursor(0), {vim.fn.mode(1), vim.fn.getpos('v')}}
+          vim.api.nvim_win_get_cursor(0), {vim.fn.mode(1), vim.fn.getpos('v'), vim.o.selection}}
 end
 _G.__vim_motions_state = snapshot
 return snapshot(...)
@@ -548,7 +548,7 @@ return snapshot(...)
 }
 bool Backend_NVIM::RequestNeovimState()
 {
-    if (m_sSession.nStateId)
+    if (m_sSession.nStateId || m_sSession.nCaretId || m_bMouseSelecting)
         return true;
     m_sSession.nStateRevision = m_sSession.nRevision;
     if (!SendRpc("nvim_exec_lua", BuildStateArguments(), m_sSession.nStateId))
@@ -565,6 +565,49 @@ bool Backend_NVIM::SendKey(const std::string &sKey)
 }
 bool Backend_NVIM::RequestCaretSync()
 {
+    if (m_bSyncSelection)
+    {
+        // Scintilla uses a half-open byte range. Supply both the upper boundary
+        // and the previous character so Lua can honor Neovim's selection option.
+        const LRESULT         nCaret             = m_sSession.nKnownCaret;
+        const LRESULT         nUpper             = std::max(nCaret, m_nSelectionAnchor);
+        const LRESULT         nPrevious          = m_sEditor.Send(Scintilla::POSITIONBEFORE, nUpper);
+        static constexpr char SelectionSyncLua[] = R"lua(
+local nAnchorLine, nAnchorColumn, nCaretLine, nCaretColumn, nPreviousLine, nPreviousColumn = ...
+local bEmpty = nAnchorLine == nCaretLine and nAnchorColumn == nCaretColumn
+local sMode = vim.fn.mode(1):sub(1, 1)
+if not bEmpty or sMode == 'n' or sMode == 'v' or sMode == 'V' or sMode == '\22' then
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-\\><C-n>', true, false, true), 'nx', false)
+end
+if nAnchorLine == nCaretLine and nAnchorColumn == nCaretColumn then
+  vim.api.nvim_win_set_cursor(0, {nCaretLine, nCaretColumn})
+  return
+end
+if vim.o.selection ~= 'exclusive' then
+  if nAnchorLine < nCaretLine or (nAnchorLine == nCaretLine and nAnchorColumn < nCaretColumn) then
+    nCaretLine, nCaretColumn = nPreviousLine, nPreviousColumn
+  else
+    nAnchorLine, nAnchorColumn = nPreviousLine, nPreviousColumn
+  end
+end
+vim.cmd('normal! v')
+vim.api.nvim_win_set_cursor(0, {nAnchorLine, nAnchorColumn})
+vim.cmd('normal! o')
+vim.api.nvim_win_set_cursor(0, {nCaretLine, nCaretColumn})
+)lua";
+        std::string           sArgs;
+        AppendMsgPackArrayHeader(sArgs, 2);
+        AppendMsgPackString(sArgs, SelectionSyncLua);
+        AppendMsgPackArrayHeader(sArgs, 6);
+        for (const LRESULT nPosition : {m_nSelectionAnchor, nCaret, nPrevious})
+        {
+            AppendMsgPackInteger(sArgs, m_sEditor.Send(Scintilla::LINEFROMPOSITION, nPosition) + 1);
+            AppendMsgPackInteger(sArgs, nPosition - m_sEditor.LineStart(nPosition));
+        }
+        m_nSelectionRevision       = m_sSession.nRevision;
+        m_sSession.nRequestedCaret = nCaret;
+        return SendRpc("nvim_exec_lua", sArgs, m_sSession.nCaretId);
+    }
     const LRESULT nPosition = m_sSession.nKnownCaret;
     const LRESULT nLine     = m_sEditor.Send(Scintilla::LINEFROMPOSITION, nPosition);
     const LRESULT nColumn   = nPosition - m_sEditor.LineStart(nPosition);
@@ -579,8 +622,9 @@ bool Backend_NVIM::RequestCaretSync()
 }
 void Backend_NVIM::OnCaretMoved(LRESULT nPosition)
 {
-    if (m_sSession.bFailed || m_sSession.bApplyingState || nPosition == m_sSession.nKnownCaret ||
-        m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument || GetEditorText() != m_sSession.sText)
+    if (m_bMouseSelecting || m_bSyncSelection || m_sSession.bFailed || m_sSession.bApplyingState ||
+        nPosition == m_sSession.nKnownCaret || m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument ||
+        GetEditorText() != m_sSession.sText)
         return;
     m_sSession.nKnownCaret = nPosition;
     ++m_sSession.nRevision;
@@ -601,6 +645,23 @@ void Backend_NVIM::OnCaretMoved(LRESULT nPosition)
         m_sSession.nTimer = NeovimResponseTimerId;
     if (!m_sSession.nTimer)
         StopAndReportError(L"Could not start the Neovim response timer.");
+}
+void Backend_NVIM::FinishMouseSelection()
+{
+    m_bMouseSelecting = false;
+    m_bMouseFinishing = false;
+    if (m_sSession.bFailed || m_sEditor.Send(Scintilla::GETDOCPOINTER) != m_sSession.nDocument ||
+        GetEditorText() != m_sSession.sText)
+        return;
+    // Rectangular and multiple selections are not representable by this path.
+    if (m_sEditor.Send(Scintilla::GETSELECTIONMODE) != 0 || m_sEditor.Send(Scintilla::GETSELECTIONS) != 1)
+        return;
+    m_nSelectionAnchor     = m_sEditor.Send(Scintilla::GETANCHOR);
+    m_sSession.nKnownCaret = m_sEditor.Caret();
+    m_bSyncSelection       = true;
+    ++m_sSession.nRevision;
+    if (!m_sSession.nCaretId && !RequestCaretSync())
+        StopAndReportError(L"Could not synchronize the mouse selection with Neovim.");
 }
 bool Backend_NVIM::SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT nColumn)
 {
@@ -827,10 +888,10 @@ Backend_NVIM::SyncResult Backend_NVIM::SyncDocument(const Value &sResult)
     if (nBuffer <= 0 || nChangedTick < 0 || nEpoch <= 0 || nSequence < 0 || nKind < 0 || nKind > 2 ||
         (nKind == 0 ? sPayload.nType != 0 : sPayload.nType != 3) || sCursor.nType != 3 || sCursor.aItems.size() != 2 ||
         sCursor.aItems[0].nType != 1 || sCursor.aItems[0].nInteger < 1 || sCursor.aItems[1].nType != 1 ||
-        sCursor.aItems[1].nInteger < 0 || sModeState.nType != 3 || sModeState.aItems.size() != 2 ||
+        sCursor.aItems[1].nInteger < 0 || sModeState.nType != 3 || sModeState.aItems.size() != 3 ||
         sModeState.aItems[0].nType != 2 || sModeState.aItems[0].sString.empty() || sModeState.aItems[1].nType != 3 ||
         sModeState.aItems[1].aItems.size() != 4 || sModeState.aItems[1].aItems[1].nType != 1 ||
-        sModeState.aItems[1].aItems[2].nType != 1)
+        sModeState.aItems[1].aItems[2].nType != 1 || sModeState.aItems[2].nType != 2)
         return SyncResult::FAILED;
     if (nKind != 1 && (nBuffer != m_sSession.nSyncedBuffer || nEpoch != m_sSession.nSyncedEpoch ||
                        nBaseSequence != m_sSession.nSyncedSequence || nSequence < nBaseSequence ||
@@ -956,7 +1017,9 @@ Backend_NVIM::SyncResult Backend_NVIM::SyncDocument(const Value &sResult)
         }
         else if (eMode == Mode::VisualCharacter)
         {
-            const LRESULT nEnd = m_sEditor.Send(Scintilla::POSITIONAFTER, std::max(nAnchor, nCaret));
+            const LRESULT nEnd = sModeState.aItems[2].sString == "exclusive" && nAnchor != nCaret
+                                     ? std::max(nAnchor, nCaret)
+                                     : m_sEditor.Send(Scintilla::POSITIONAFTER, std::max(nAnchor, nCaret));
             (void)m_sEditor.Send(
                 Scintilla::SETSEL, nCaret < nAnchor ? nEnd : nAnchor, nCaret < nAnchor ? nCaret : nEnd);
         }
@@ -1039,13 +1102,15 @@ bool Backend_NVIM::PollResponses()
         if (m_sSession.nCaretId && sResponse.aItems[1].nInteger == m_sSession.nCaretId)
         {
             m_sSession.nCaretId = 0;
-            if (m_sSession.nKnownCaret != m_sSession.nRequestedCaret)
+            if (m_sSession.nKnownCaret != m_sSession.nRequestedCaret ||
+                (m_bSyncSelection && m_nSelectionRevision != m_sSession.nRevision))
             {
                 if (!RequestCaretSync())
                     return false;
             }
             else
             {
+                m_bSyncSelection = false;
                 for (const auto &sKey : m_sSession.aPendingKeys)
                     if (!SendKey(sKey))
                         return false;
@@ -1058,7 +1123,7 @@ bool Backend_NVIM::PollResponses()
         if (sResponse.aItems[1].nInteger != m_sSession.nStateId)
             return false;
         m_sSession.nStateId = 0;
-        if (m_sSession.nStateRevision != m_sSession.nRevision)
+        if (m_bMouseSelecting || m_sSession.nCaretId || m_sSession.nStateRevision != m_sSession.nRevision)
         {
             if (!RequestNeovimState())
                 return false;
@@ -1179,6 +1244,28 @@ return {bOk and '' or tostring(aResult), bOk and aResult or {}}
 
 BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
 {
+    if (nMessage == WM_LBUTTONDOWN && !(wParam & MK_CONTROL) && !(GetKeyState(VK_MENU) & 0x8000) && !m_sSession.bFailed)
+    {
+        // Drain pre-gesture edits before Scintilla chooses positions in the text.
+        if (!PrepareHostKey())
+            return TRUE;
+        m_bMouseSelecting = true;
+        ++m_sSession.nRevision;
+    }
+    if (m_bMouseSelecting && (nMessage == WM_LBUTTONDOWN || nMessage == WM_MOUSEMOVE || nMessage == WM_LBUTTONUP ||
+                              nMessage == WM_CAPTURECHANGED))
+    {
+        ++m_nMouseDepth;
+        if (nMessage == WM_LBUTTONUP || nMessage == WM_CAPTURECHANGED)
+            m_bMouseFinishing = true;
+        // Sample after Scintilla handles the mouse, also in the standalone host
+        // where SCN_UPDATEUI is not forwarded. ReleaseCapture can reenter here.
+        DefSubclassProc(hWindow, nMessage, wParam, lParam);
+        --m_nMouseDepth;
+        if (!m_nMouseDepth && m_bMouseFinishing)
+            FinishMouseSelection();
+        return TRUE;
+    }
     if (nMessage == WM_KILLFOCUS)
         m_bPassThroughKey = false;
     if (nMessage == WM_KEYDOWN || nMessage == WM_SYSKEYDOWN)

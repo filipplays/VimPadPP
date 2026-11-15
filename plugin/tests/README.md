@@ -179,3 +179,32 @@ modifiers do not match, Ctrl+V still belongs to Neovim, and translated
 characters pass through even after Ctrl is released. It also checks that
 subsequent ordinary input returns to Neovim. The test does not load Notepad++
 or verify its actual tab switching, menu commands, or two-view lifecycle.
+
+## Neovim mouse selections
+
+Run the Lua selection conversion checks from the repository root:
+
+```sh
+python3 plugin/tests/neovim/selection_sync_test.py
+```
+
+They extract the actual backend helper and check forward/backward selections,
+Unicode, line boundaries, inclusive/exclusive options, deletion, and mode
+transitions using a local embedded Neovim.
+
+The Windows integration test sends mouse messages to real Scintilla and checks
+selection persistence while polling, release, and deletion immediately after
+release. Build the backend, then compile and run the test alongside its DLLs:
+
+```sh
+make -C plugin nvim
+x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic -Wno-cast-function-type \
+  -Iplugin/src/backends/common plugin/tests/neovim/mouse_selection_test.cpp \
+  -o plugin/build/windows-x64/neovim-build/MouseSelectionTests.exe \
+  -static -static-libgcc -static-libstdc++
+cd plugin/build/windows-x64/neovim-build
+wine MouseSelectionTests.exe
+```
+
+The test uses the staged Neovim configuration. It covers ordinary stream
+selections, not rectangular/multiple selections or Notepad++ lifecycle behavior.

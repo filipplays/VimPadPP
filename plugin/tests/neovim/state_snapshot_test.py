@@ -38,7 +38,7 @@ local function snapshot(aKnown, bAcceptCurrent)
   bInstalled = true
   local aDecoded = vim.mpack.decode(vim.mpack.encode(aState))
   assert(#aDecoded == 9 and type(aDecoded[1]) == 'number' and type(aDecoded[2]) == 'number')
-  assert(#aDecoded[8] == 2 and #aDecoded[9] == 2)
+  assert(#aDecoded[8] == 2 and #aDecoded[9] == 3)
   return aDecoded
 end
 local function apply(aKnown, aState, aMirror)
