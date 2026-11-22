@@ -1,4 +1,5 @@
 #include "msgpack_frame.h"
+#include "msgpack_value.h"
 
 #include <cassert>
 #include <iostream>
@@ -11,6 +12,8 @@ std::string Bytes(std::initializer_list<unsigned char> aBytes) { return std::str
 void        CheckFragmentation(const std::string &sMessage)
 {
     using Result = MsgPackFrame::Result;
+    MsgPack::Value sDecoded;
+    assert(MsgPack::Decoder(sMessage).Decode(sDecoded));
     for (size_t nSplit = 0; nSplit < sMessage.size(); ++nSplit)
     {
         MsgPackFrame sFrame;
@@ -94,5 +97,49 @@ int main()
         assert(sFrame.Scan(Bytes({0xc0})) == MsgPackFrame::Result::COMPLETE);
     }
     CheckFragmentation(std::string(32, static_cast<char>(0x91)) + Bytes({0xc0}));
+    // Decode the outgoing array length independently of the production decoder.
+    for (const size_t nCount : {65535u, 65536u, 65537u})
+    {
+        std::string sEncoded;
+        assert(MsgPack::AppendArrayHeader(sEncoded, nCount));
+        const size_t nBytes = nCount <= 65535 ? 2 : 4;
+        assert(static_cast<unsigned char>(sEncoded[0]) == (nBytes == 2 ? 0xdc : 0xdd));
+        size_t nDecodedCount = 0;
+        for (size_t nIndex = 1; nIndex <= nBytes; ++nIndex)
+            nDecodedCount = (nDecodedCount << 8) | static_cast<unsigned char>(sEncoded[nIndex]);
+        assert(nDecodedCount == nCount);
+        sEncoded.append(nCount, static_cast<char>(0xa0)); // Empty line strings.
+        MsgPackFrame sFrame;
+        assert(sFrame.Scan(sEncoded) == MsgPackFrame::Result::COMPLETE);
+        MsgPack::Value sValue;
+        assert(MsgPack::Decoder(sEncoded).Decode(sValue));
+        assert(sValue.nType == 3 && sValue.aItems.size() == nCount);
+        assert(sValue.aItems.front().nType == 2 && sValue.aItems.back().nType == 2);
+    }
+    std::string sUnchanged = "prefix";
+    assert(!MsgPack::AppendArrayHeader(sUnchanged, uint64_t{UINT32_MAX} + 1));
+    assert(sUnchanged == "prefix");
+    for (const auto &sHeader : {Bytes({0xdd, 1, 0, 0, 0}), Bytes({0xdf, 0, 0x10, 0, 0})})
+    {
+        MsgPackFrame sFrame;
+        assert(sFrame.Scan(sHeader) == MsgPackFrame::Result::INVALID);
+        MsgPack::Value sValue;
+        assert(!MsgPack::Decoder(sHeader).Decode(sValue));
+    }
+    // Individually acceptable nested arrays must share the frame's value limit.
+    std::string sNested = Bytes({0x92});
+    assert(MsgPack::AppendArrayHeader(sNested, MsgPack::MaxValues / 2));
+    sNested.append(MsgPack::MaxValues / 2, static_cast<char>(0xc0));
+    assert(MsgPack::AppendArrayHeader(sNested, MsgPack::MaxValues / 2));
+    MsgPackFrame sNestedFrame;
+    assert(sNestedFrame.Scan(sNested) == MsgPackFrame::Result::INVALID);
+    // Charge nested containers and string storage against the same budget.
+    const std::string sBudget = Bytes({0x92, 0x91, 0xa1, 'x', 0x91, 0xa1, 'y'});
+    MsgPack::Value    sBudgetValue;
+    assert(!MsgPack::Decoder(sBudget, 5 * sizeof(MsgPack::Value)).Decode(sBudgetValue));
+    assert(MsgPack::Decoder(sBudget, 5 * sizeof(MsgPack::Value) + 4).Decode(sBudgetValue));
+    // Decoding never consumes a following frame or accepts trailing garbage.
+    assert(!MsgPack::Decoder(Bytes({0xc0, 0xc0})).Decode(sBudgetValue));
+    assert(!MsgPack::Decoder(Bytes({0x91})).Decode(sBudgetValue));
     std::cout << "MessagePack framing checks passed\n";
 }

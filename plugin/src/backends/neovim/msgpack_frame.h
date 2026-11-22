@@ -1,5 +1,6 @@
 #pragma once
 
+#include "msgpack_limits.h"
 #include <algorithm>
 #include <cstdint>
 #include <string_view>
@@ -27,7 +28,7 @@ class MsgPackFrame
             {
                 if (m_nOffset == sBytes.size())
                     return Result::NEED_MORE;
-                if (m_aRemaining.size() > 33)
+                if (m_aRemaining.size() > 33 || m_nOffset >= MsgPack::MaxFrameBytes)
                     return Fail();
                 const auto nTag = static_cast<unsigned char>(sBytes[m_nOffset++]);
                 m_eKind         = Kind::PAYLOAD;
@@ -75,18 +76,22 @@ class MsgPackFrame
             {
                 while (m_nLengthBytes)
                 {
+                    if (m_nOffset >= MsgPack::MaxFrameBytes)
+                        return Fail();
                     if (m_nOffset == sBytes.size())
                         return Result::NEED_MORE;
                     m_nLength = (m_nLength << 8) | static_cast<unsigned char>(sBytes[m_nOffset++]);
                     --m_nLengthBytes;
                 }
-                // Match the decoder's element, payload and map limits.
-                if (m_nLength > (m_eKind == Kind::MAP ? 1024 * 1024 : 16 * 1024 * 1024))
+                if (m_nLength > MsgPack::MaxPayloadBytes)
                     return Fail();
                 if (m_eKind == Kind::ARRAY || m_eKind == Kind::MAP)
                 {
                     const uint64_t nChildren = m_nLength * (m_eKind == Kind::MAP ? 2 : 1);
-                    m_ePhase                 = Phase::TAG;
+                    if (nChildren > MsgPack::MaxValues - m_nValues)
+                        return Fail();
+                    m_nValues += static_cast<size_t>(nChildren);
+                    m_ePhase = Phase::TAG;
                     if (nChildren)
                         m_aRemaining.push_back(nChildren);
                     else
@@ -95,7 +100,8 @@ class MsgPackFrame
                 else
                 {
                     m_nPayloadRemaining = m_nLength + (m_eKind == Kind::EXT ? 1 : 0);
-                    if (m_nPayloadRemaining > 16 * 1024 * 1024)
+                    if (m_nPayloadRemaining > MsgPack::MaxPayloadBytes ||
+                        m_nPayloadRemaining > MsgPack::MaxFrameBytes - m_nOffset)
                         return Fail();
                     m_ePhase = Phase::PAYLOAD;
                 }
@@ -119,6 +125,7 @@ class MsgPackFrame
     {
         m_aRemaining.assign(1, 1);
         m_nOffset           = 0;
+        m_nValues           = 1;
         m_nLength           = 0;
         m_nLengthBytes      = 0;
         m_nPayloadRemaining = 0;
@@ -142,6 +149,7 @@ class MsgPackFrame
     };
     std::vector<uint64_t> m_aRemaining{1};
     size_t                m_nOffset           = 0;
+    size_t                m_nValues           = 1;
     uint64_t              m_nLength           = 0;
     unsigned              m_nLengthBytes      = 0;
     uint64_t              m_nPayloadRemaining = 0;

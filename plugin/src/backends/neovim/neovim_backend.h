@@ -5,6 +5,7 @@
 #include "../common/host_key.h"
 #include "line_update.h"
 #include "msgpack_frame.h"
+#include "msgpack_value.h"
 
 #include <cstdint>
 #include <string>
@@ -45,13 +46,7 @@ class Backend_NVIM : public Backend
         VisualLine      = 'V',
         VisualBlock     = '\x16'
     };
-    struct Value
-    {
-        int                nType    = 0; // 0 nil, 1 integer, 2 string, 3 array, 4 other
-        int64_t            nInteger = 0;
-        std::string        sString;
-        std::vector<Value> aItems;
-    };
+    using Value = MsgPack::Value;
     struct Session
     {
         LRESULT                  nDocument = 0;
@@ -67,8 +62,6 @@ class Backend_NVIM : public Backend
         int64_t                  nSyncedChangedTick = -1;
         int64_t                  nSyncedEpoch       = -1;
         int64_t                  nSyncedSequence    = -1;
-        size_t                   nReadOffset        = 0;
-        bool                     bBufferedRead      = false;
         unsigned                 nStateId           = 0;
         unsigned                 nRevision          = 0;
         unsigned                 nStateRevision     = 0;
@@ -119,20 +112,20 @@ class Backend_NVIM : public Backend
     void                 StopNeovimProcess();
     void                 AppendBigEndianBytes(std::string &sData, uint64_t nValue, int nBytes);
     void                 AppendMsgPackString(std::string &sData, const std::string &sValue);
-    bool                 ReadBytes(void *pData, size_t nSize);
-    bool                 ReadBigEndianInteger(int nBytes, uint64_t &nValue);
-    bool                 DecodeMsgPackValue(Value &sValue, int nDepth = 0);
-    void                 AppendMsgPackArrayHeader(std::string &sData, size_t nSize);
+    bool                 AppendMsgPackArrayHeader(std::string &sData, size_t nSize);
     void                 AppendMsgPackInteger(std::string &sData, int64_t nValue);
     void                 AppendMsgPackBoolean(std::string &sData, bool bValue);
-    bool SendRpc(const std::string &sMethod, const std::string &sArguments, unsigned &nId, bool bNotification = false);
-    bool CallRpcAndWait(const std::string &sMethod, const std::string &sArguments, Value &sResult);
-    bool AttachUi();
-    bool CreateCommandBar();
-    bool HandleNotification(const Value &sNotification);
-    void UpdateCommandBar();
-    void PositionCommandBar();
-    void EnsureCaretVisible();
+    bool                 SendRpc(
+        const std::string &sMethod, const std::string &sArguments, unsigned &nId, bool bNotification = false,
+        ULONGLONG nDeadline = 0);
+    bool        ReadRpcMessage(Value &sResponse, bool bWait, ULONGLONG nDeadline, bool &bReady);
+    bool        CallRpcAndWait(const std::string &sMethod, const std::string &sArguments, Value &sResult);
+    bool        AttachUi();
+    bool        CreateCommandBar();
+    bool        HandleNotification(const Value &sNotification);
+    void        UpdateCommandBar();
+    void        PositionCommandBar();
+    void        EnsureCaretVisible();
     std::string BuildStateArguments(bool bAcceptCurrent = false);
     bool        RequestNeovimState();
     bool        SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT nColumn);

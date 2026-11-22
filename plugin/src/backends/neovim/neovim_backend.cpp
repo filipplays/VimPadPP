@@ -1,5 +1,6 @@
 #include "neovim_backend.h"
 #include "ScintillaMessages.h"
+#include "rpc_pipe.h"
 // #include "../common/helpers.h" // Uncomment for the timing hooks below.
 
 #include <algorithm>
@@ -57,181 +58,9 @@ void Backend_NVIM::AppendMsgPackString(std::string &sData, const std::string &sV
     AppendBigEndianBytes(sData, sValue.size(), 4);
     sData += sValue;
 }
-bool Backend_NVIM::ReadBytes(void *pData, size_t nSize)
+bool Backend_NVIM::AppendMsgPackArrayHeader(std::string &sData, size_t nSize)
 {
-    if (m_sSession.bBufferedRead)
-    {
-        if (nSize > m_sSession.sIncoming.size() - m_sSession.nReadOffset)
-            return false;
-        std::memcpy(pData, m_sSession.sIncoming.data() + m_sSession.nReadOffset, nSize);
-        m_sSession.nReadOffset += nSize;
-        return true;
-    }
-    auto     *pBytes    = static_cast<char *>(pData);
-    ULONGLONG nDeadline = GetTickCount64() + 5000;
-    while (nSize)
-    {
-        DWORD nAvailable = 0, nRead = 0;
-        if (!PeekNamedPipe(m_sSession.hOutput, nullptr, 0, nullptr, &nAvailable, nullptr))
-            return false;
-        if (!nAvailable)
-        {
-            if (WaitForSingleObject(m_sSession.hProcess, 0) == WAIT_OBJECT_0 || GetTickCount64() >= nDeadline)
-                return false;
-            Sleep(1);
-            continue;
-        }
-        if (!ReadFile(
-                m_sSession.hOutput, pBytes, static_cast<DWORD>(nSize < nAvailable ? nSize : nAvailable), &nRead,
-                nullptr) ||
-            !nRead)
-            return false;
-        pBytes += nRead;
-        nSize -= nRead;
-    }
-    return true;
-}
-bool Backend_NVIM::ReadBigEndianInteger(int nBytes, uint64_t &nValue)
-{
-    nValue = 0;
-    for (int nIndex = 0; nIndex < nBytes; ++nIndex)
-    {
-        unsigned char nByte;
-        if (!ReadBytes(&nByte, 1))
-            return false;
-        nValue = (nValue << 8) | nByte;
-    }
-    return true;
-}
-bool Backend_NVIM::DecodeMsgPackValue(Value &sValue, int nDepth)
-{
-    if (nDepth > 32)
-        return false;
-    unsigned char nTag;
-    if (!ReadBytes(&nTag, 1))
-        return false;
-    uint64_t nLength = 0;
-    if (nTag <= 0x7f)
-    {
-        sValue.nType    = 1;
-        sValue.nInteger = nTag;
-        return true;
-    }
-    if (nTag >= 0xe0)
-    {
-        sValue.nType    = 1;
-        sValue.nInteger = static_cast<int8_t>(nTag);
-        return true;
-    }
-    if ((nTag & 0xe0) == 0xa0)
-    {
-        sValue.nType = 2;
-        nLength      = nTag & 31;
-    }
-    else if ((nTag & 0xf0) == 0x90)
-    {
-        sValue.nType = 3;
-        nLength      = nTag & 15;
-    }
-    else if (nTag == 0xc0)
-        return true;
-    else if (nTag == 0xc2 || nTag == 0xc3)
-    {
-        sValue.nType    = 4;
-        sValue.nInteger = nTag == 0xc3;
-        return true;
-    }
-    else if ((nTag & 0xf0) == 0x80 || nTag == 0xde || nTag == 0xdf)
-    {
-        sValue.nType = 4;
-        if ((nTag & 0xf0) == 0x80)
-            nLength = nTag & 15;
-        else if (!ReadBigEndianInteger(nTag == 0xde ? 2 : 4, nLength))
-            return false;
-        if (nLength > 1024 * 1024)
-            return false;
-        for (uint64_t nIndex = 0; nIndex < nLength * 2; ++nIndex)
-        {
-            Value sItem;
-            if (!DecodeMsgPackValue(sItem, nDepth + 1))
-                return false;
-        }
-        return true;
-    }
-    else if (nTag == 0xca || nTag == 0xcb || (nTag >= 0xd4 && nTag <= 0xd8) || (nTag >= 0xc7 && nTag <= 0xc9))
-    {
-        sValue.nType = 4;
-        if (nTag == 0xca || nTag == 0xcb)
-            nLength = nTag == 0xca ? 4 : 8;
-        else
-        {
-            if (nTag >= 0xd4)
-                nLength = uint64_t{1} << (nTag - 0xd4);
-            else if (!ReadBigEndianInteger(nTag == 0xc7 ? 1 : nTag == 0xc8 ? 2 : 4, nLength))
-                return false;
-            ++nLength; // Extension type byte.
-        }
-        if (nLength > 16 * 1024 * 1024)
-            return false;
-        char aBytes[256];
-        while (nLength)
-        {
-            size_t nChunk = static_cast<size_t>(std::min<uint64_t>(nLength, sizeof(aBytes)));
-            if (!ReadBytes(aBytes, nChunk))
-                return false;
-            nLength -= nChunk;
-        }
-        return true;
-    }
-    else if (nTag >= 0xcc && nTag <= 0xcf)
-    {
-        sValue.nType = 1;
-        if (!ReadBigEndianInteger(1 << (nTag - 0xcc), nLength))
-            return false;
-        sValue.nInteger = static_cast<int64_t>(nLength);
-        return true;
-    }
-    else if (nTag >= 0xd0 && nTag <= 0xd3)
-    {
-        int nBytes = 1 << (nTag - 0xd0);
-        if (!ReadBigEndianInteger(nBytes, nLength))
-            return false;
-        sValue.nType    = 1;
-        sValue.nInteger = nBytes == 8 ? static_cast<int64_t>(nLength)
-                                      : static_cast<int64_t>(nLength << (64 - nBytes * 8)) >> (64 - nBytes * 8);
-        return true;
-    }
-    else if (nTag == 0xd9 || nTag == 0xda || nTag == 0xdb || nTag == 0xc4 || nTag == 0xc5 || nTag == 0xc6)
-    {
-        sValue.nType = 2;
-        if (!ReadBigEndianInteger(nTag == 0xd9 || nTag == 0xc4 ? 1 : nTag == 0xda || nTag == 0xc5 ? 2 : 4, nLength))
-            return false;
-    }
-    else if (nTag == 0xdc || nTag == 0xdd)
-    {
-        sValue.nType = 3;
-        if (!ReadBigEndianInteger(nTag == 0xdc ? 2 : 4, nLength))
-            return false;
-    }
-    else
-        return false;
-    if (nLength > 16 * 1024 * 1024)
-        return false;
-    if (sValue.nType == 2)
-    {
-        sValue.sString.resize(static_cast<size_t>(nLength));
-        return !nLength || ReadBytes(sValue.sString.data(), static_cast<size_t>(nLength));
-    }
-    sValue.aItems.resize(static_cast<size_t>(nLength));
-    for (auto &sItem : sValue.aItems)
-        if (!DecodeMsgPackValue(sItem, nDepth + 1))
-            return false;
-    return true;
-}
-void Backend_NVIM::AppendMsgPackArrayHeader(std::string &sData, size_t nSize)
-{
-    sData.push_back(static_cast<char>(0xdc));
-    AppendBigEndianBytes(sData, nSize, 2);
+    return MsgPack::AppendArrayHeader(sData, nSize);
 }
 void Backend_NVIM::AppendMsgPackInteger(std::string &sData, int64_t nValue)
 {
@@ -242,8 +71,11 @@ void Backend_NVIM::AppendMsgPackBoolean(std::string &sData, bool bValue)
 {
     sData.push_back(static_cast<char>(bValue ? 0xc3 : 0xc2));
 }
-bool Backend_NVIM::SendRpc(const std::string &sMethod, const std::string &sArguments, unsigned &nId, bool bNotification)
+bool Backend_NVIM::SendRpc(
+    const std::string &sMethod, const std::string &sArguments, unsigned &nId, bool bNotification, ULONGLONG nDeadline)
 {
+    if (!nDeadline)
+        nDeadline = GetTickCount64() + 5000;
     std::string sRequest;
     sRequest.push_back(static_cast<char>(bNotification ? 0x93 : 0x94));
     sRequest.push_back(static_cast<char>(bNotification ? 2 : 0));
@@ -255,19 +87,78 @@ bool Backend_NVIM::SendRpc(const std::string &sMethod, const std::string &sArgum
     }
     AppendMsgPackString(sRequest, sMethod);
     sRequest += sArguments;
-    DWORD nWritten = 0;
-    return WriteFile(m_sSession.hInput, sRequest.data(), static_cast<DWORD>(sRequest.size()), &nWritten, nullptr) &&
-           nWritten == sRequest.size();
+    return sRequest.size() <= MsgPack::MaxFrameBytes &&
+           RpcPipe::Write(m_sSession.hInput, m_sSession.hProcess, sRequest, nDeadline);
 }
+
+bool Backend_NVIM::ReadRpcMessage(Value &sResponse, bool bWait, ULONGLONG nDeadline, bool &bReady)
+{
+    bReady = false;
+    try
+    {
+        for (;;)
+        {
+            if (GetTickCount64() >= nDeadline)
+                return !bWait;
+            const auto eFrame = m_sSession.sIncomingFrame.Scan(m_sSession.sIncoming);
+            if (eFrame == MsgPackFrame::Result::INVALID)
+                return false;
+            if (eFrame == MsgPackFrame::Result::COMPLETE)
+            {
+                const size_t     nSize = m_sSession.sIncomingFrame.Size();
+                MsgPack::Decoder sDecoder(std::string_view(m_sSession.sIncoming).substr(0, nSize));
+                if (!sDecoder.Decode(sResponse))
+                    return false;
+                m_sSession.sIncoming.erase(0, nSize);
+                m_sSession.sIncomingFrame.Reset();
+                bReady = true;
+                return true;
+            }
+            DWORD nAvailable = 0;
+            if (!PeekNamedPipe(m_sSession.hOutput, nullptr, 0, nullptr, &nAvailable, nullptr))
+                return false;
+            if (!nAvailable)
+            {
+                if (m_sSession.hProcess && WaitForSingleObject(m_sSession.hProcess, 0) == WAIT_OBJECT_0)
+                    return false;
+                if (!bWait)
+                    return true;
+                Sleep(1);
+                continue;
+            }
+            if (m_sSession.sIncoming.size() >= MsgPack::MaxFrameBytes)
+                return false;
+            char        aBuffer[4096];
+            const DWORD nChunk = static_cast<DWORD>(std::min<size_t>(
+                std::min<size_t>(nAvailable, sizeof(aBuffer)), MsgPack::MaxFrameBytes - m_sSession.sIncoming.size()));
+            DWORD       nRead  = 0;
+            if (!ReadFile(m_sSession.hOutput, aBuffer, nChunk, &nRead, nullptr) || !nRead)
+                return false;
+            m_sSession.sIncoming.append(aBuffer, nRead);
+        }
+    }
+    catch (const std::bad_alloc &)
+    {
+        return false;
+    }
+    catch (const std::length_error &)
+    {
+        return false;
+    }
+}
+
 bool Backend_NVIM::CallRpcAndWait(const std::string &sMethod, const std::string &sArguments, Value &sResult)
 {
-    unsigned nId = 0;
-    if (!SendRpc(sMethod, sArguments, nId))
+    const ULONGLONG nDeadline = GetTickCount64() + 5000;
+    unsigned        nId       = 0;
+    if (!SendRpc(sMethod, sArguments, nId, false, nDeadline))
         return false;
     for (;;)
     {
         Value sResponse;
-        if (!DecodeMsgPackValue(sResponse) || sResponse.nType != 3 || sResponse.aItems.empty())
+        bool  bReady = false;
+        if (!ReadRpcMessage(sResponse, true, nDeadline, bReady) || !bReady || sResponse.nType != 3 ||
+            sResponse.aItems.empty())
             return false;
         if (sResponse.aItems[0].nInteger == 2)
         {
@@ -682,7 +573,8 @@ bool Backend_NVIM::SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT n
     for (char nChar : sNormalized)
         if (nChar == '\n')
             ++nLines;
-    AppendMsgPackArrayHeader(sArgs, nLines);
+    if (!AppendMsgPackArrayHeader(sArgs, nLines))
+        return false;
     size_t nStart = 0;
     for (size_t nIndex = 0; nIndex <= sNormalized.size(); ++nIndex)
         if (nIndex == sNormalized.size() || sNormalized[nIndex] == '\n')
@@ -834,7 +726,7 @@ bool Backend_NVIM::StartNeovimProcess()
     sPath                   = sNeovimDir + L"\\bin\\nvim.exe";
     SECURITY_ATTRIBUTES sSecurity{sizeof(sSecurity), nullptr, TRUE};
     HANDLE              hChildInput = nullptr, hChildOutput = nullptr;
-    if (!CreatePipe(&hChildInput, &m_sSession.hInput, &sSecurity, 0) ||
+    if (!RpcPipe::CreateInput(m_sSession.hInput, hChildInput) ||
         !CreatePipe(&m_sSession.hOutput, &hChildOutput, &sSecurity, 0))
     {
         CloseHandleAndReset(hChildInput);
@@ -1060,42 +952,16 @@ Backend_NVIM::SyncResult Backend_NVIM::SyncDocument(const Value &sResult)
 }
 bool Backend_NVIM::PollResponses()
 {
-    // ScopedTimer sTimer("Poll Neovim responses");
-    DWORD nAvailable = 0;
-    if (!PeekNamedPipe(m_sSession.hOutput, nullptr, 0, nullptr, &nAvailable, nullptr))
-        return false;
-    while (nAvailable)
+    const ULONGLONG nDeadline = GetTickCount64() + 10;
+    // Bound each timer turn even if the peer streams notifications forever.
+    for (unsigned nMessages = 0; nMessages < 128; ++nMessages)
     {
-        char  aBuffer[4096];
-        DWORD nRead = 0;
-        if (!ReadFile(
-                m_sSession.hOutput, aBuffer, nAvailable < sizeof(aBuffer) ? nAvailable : sizeof(aBuffer), &nRead,
-                nullptr) ||
-            !nRead)
+        Value sResponse;
+        bool  bReady = false;
+        if (!ReadRpcMessage(sResponse, false, nDeadline, bReady))
             return false;
-        m_sSession.sIncoming.append(aBuffer, nRead);
-        nAvailable -= nRead;
-    }
-    if (m_sSession.sIncoming.size() > 32 * 1024 * 1024)
-        return false;
-    for (;;)
-    {
-        const auto eFrame = m_sSession.sIncomingFrame.Scan(m_sSession.sIncoming);
-        if (eFrame == MsgPackFrame::Result::INVALID)
-            return false;
-        if (eFrame == MsgPackFrame::Result::NEED_MORE)
-        {
+        if (!bReady)
             break;
-        }
-        m_sSession.nReadOffset   = 0;
-        m_sSession.bBufferedRead = true;
-        Value      sResponse;
-        const bool bComplete     = DecodeMsgPackValue(sResponse);
-        m_sSession.bBufferedRead = false;
-        if (!bComplete || m_sSession.nReadOffset != m_sSession.sIncomingFrame.Size())
-            return false;
-        m_sSession.sIncoming.erase(0, m_sSession.nReadOffset);
-        m_sSession.sIncomingFrame.Reset();
         if (sResponse.nType == 3 && !sResponse.aItems.empty() && sResponse.aItems[0].nInteger == 2)
         {
             if (!HandleNotification(sResponse))
