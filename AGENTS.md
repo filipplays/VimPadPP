@@ -25,6 +25,14 @@ implementation. Installing into Notepad++ still requires an explicit request.
 This authorization does not bypass sandbox restrictions or execution approval
 rules; request execution approval when the environment requires it.
 
+Use the repository-root [.clang-format](.clang-format) for C/C++ formatting.
+Before finishing an authorized C/C++ change, format only the files edited for
+that task with `clang-format --style=file -i <edited-files>`, run from the
+repository root. The formatter discovers this configuration for files below
+the root, so no machine-specific configuration path is needed. Do not format
+unrelated files. Report the formatting command used, or explain why formatting
+could not run.
+
 Running clang-format on C/C++ files edited for an authorized task does not
 require separate permission, including when the formatter writes those files.
 
