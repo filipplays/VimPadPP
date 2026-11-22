@@ -79,8 +79,30 @@ void Manager::CloseDocument(UINT_PTR) {}
 
 thread_local Manager *Manager::s_pKeyboardManager = nullptr;
 
+void Manager::OnBackendFailure(void *pContext)
+{
+    auto *pManager              = static_cast<Manager *>(pContext);
+    pManager->m_bDisabled       = true;
+    pManager->m_bFailurePending = true;
+}
+
+void Manager::FinishDispatch()
+{
+    if (--m_nDispatchDepth || !m_bFailurePending)
+        return;
+    // Error dialogs and Scintilla messages can reenter the manager. Only free
+    // sessions once every backend call has returned to its outermost caller.
+    m_bFailurePending = false;
+    while (!m_aViews.empty())
+        UninstallVim(m_aViews.begin()->first);
+    if (m_pFailureHandler)
+        m_pFailureHandler();
+}
+
 Backend *Manager::FindSession(HWND hWindow)
 {
+    if (m_bDisabled)
+        return nullptr;
     auto itView = m_aViews.find(hWindow);
     if (itView == m_aViews.end())
         return nullptr;
@@ -101,6 +123,7 @@ Backend *Manager::FindSession(HWND hWindow)
         // Reserve the entry before installation: Scintilla calls may reenter.
         m_aDocuments.try_emplace(nDocument);
         auto pBackend = std::make_unique<Backend_NVIM>(hWindow, m_pSaveHandler);
+        pBackend->SetFailureHandler(OnBackendFailure, this);
         if (!pBackend->Install())
         {
             pBackend->Uninstall();
@@ -122,6 +145,7 @@ Backend *Manager::FindSession(HWND hWindow)
         itDocument->second.hView = hWindow;
         if (!pBackend->ResumeView(hWindow))
         {
+            OnBackendFailure(this);
             pBackend->SuspendView();
             itDocument->second.hView = nullptr;
             return nullptr;
@@ -132,8 +156,9 @@ Backend *Manager::FindSession(HWND hWindow)
 
 LRESULT CALLBACK Manager::KeyboardMessageHook(int nCode, WPARAM wParam, LPARAM lParam)
 {
-    auto *pManager = s_pKeyboardManager;
-    auto *pMessage = reinterpret_cast<MSG *>(lParam);
+    auto         *pManager = s_pKeyboardManager;
+    DispatchScope sDispatch(pManager);
+    auto         *pMessage = reinterpret_cast<MSG *>(lParam);
     if (nCode >= 0 && wParam == PM_REMOVE && pManager && pMessage && pMessage->hwnd == GetFocus() &&
         (pMessage->message == WM_KEYDOWN || pMessage->message == WM_SYSKEYDOWN))
     {
@@ -147,7 +172,8 @@ LRESULT CALLBACK Manager::KeyboardMessageHook(int nCode, WPARAM wParam, LPARAM l
             (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) && bHandledControlKey)
         {
             SendMessageW(pMessage->hwnd, pMessage->message, nKey, pMessage->lParam);
-            pMessage->message = WM_NULL;
+            if (!pManager->m_bDisabled)
+                pMessage->message = WM_NULL;
         }
     }
     return CallNextHookEx(pManager ? pManager->m_hKeyboardHook : nullptr, nCode, wParam, lParam);
@@ -155,6 +181,11 @@ LRESULT CALLBACK Manager::KeyboardMessageHook(int nCode, WPARAM wParam, LPARAM l
 
 BOOL Manager::InstallVim(HWND hWindow)
 {
+    if (!m_nDispatchDepth && m_aViews.empty())
+        m_bDisabled = false;
+    DispatchScope sDispatch(this);
+    if (m_bDisabled)
+        return FALSE;
     wchar_t aClassName[32]{};
     if (!IsWindow(hWindow) || !GetClassNameW(hWindow, aClassName, 32) || lstrcmpW(aClassName, L"Scintilla"))
         return FALSE;
@@ -187,6 +218,7 @@ BOOL Manager::InstallVim(HWND hWindow)
 
 void Manager::ActivateDocument(HWND hWindow, UINT_PTR nBufferId)
 {
+    DispatchScope sDispatch(this);
     if (auto *pBackend = FindSession(hWindow))
     {
         const LRESULT nDocument              = SendMessageW(hWindow, Scintilla::GETDOCPOINTER, 0, 0);
@@ -197,6 +229,7 @@ void Manager::ActivateDocument(HWND hWindow, UINT_PTR nBufferId)
 
 void Manager::CloseDocument(UINT_PTR nBufferId)
 {
+    DispatchScope sDispatch(this);
     for (auto itDocument = m_aDocuments.begin(); itDocument != m_aDocuments.end();)
     {
         if (itDocument->second.nBufferId != nBufferId || !nBufferId)
@@ -218,6 +251,9 @@ void Manager::CloseDocument(UINT_PTR nBufferId)
 
 BOOL Manager::NotifyCaretMoved(HWND hWindow, LRESULT nPosition)
 {
+    DispatchScope sDispatch(this);
+    if (m_bDisabled)
+        return FALSE;
     // Ignore notifications from inactive clones and during document switches.
     auto itView = m_aViews.find(hWindow);
     if (itView == m_aViews.end() || itView->second != SendMessageW(hWindow, Scintilla::GETDOCPOINTER, 0, 0))
@@ -231,6 +267,7 @@ BOOL Manager::NotifyCaretMoved(HWND hWindow, LRESULT nPosition)
 
 BOOL Manager::UninstallVim(HWND hWindow)
 {
+    DispatchScope sDispatch(this);
     if (!m_aViews.contains(hWindow))
         return FALSE;
     RemoveWindowSubclass(hWindow, VimSubclassProc, 0);
@@ -261,7 +298,8 @@ BOOL Manager::UninstallVim(HWND hWindow)
 LRESULT CALLBACK
 Manager::VimSubclassProc(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR nId, DWORD_PTR nData)
 {
-    auto *pManager = reinterpret_cast<Manager *>(nData);
+    auto         *pManager = reinterpret_cast<Manager *>(nData);
+    DispatchScope sDispatch(pManager);
     if (nMessage == WM_NCDESTROY)
     {
         pManager->UninstallVim(hWindow);
@@ -270,6 +308,8 @@ Manager::VimSubclassProc(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lPar
     // Document identity queries are also used by this subclass's routing logic.
     // Forward them directly to avoid recursively routing the query itself.
     if (nMessage == Scintilla::GETDOCPOINTER)
+        return DefSubclassProc(hWindow, nMessage, wParam, lParam);
+    if (pManager->m_bDisabled)
         return DefSubclassProc(hWindow, nMessage, wParam, lParam);
     // Background clone layout/timer messages must not steal the active session.
     auto itView = pManager->m_aViews.find(hWindow);

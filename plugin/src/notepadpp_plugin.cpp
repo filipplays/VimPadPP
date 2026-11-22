@@ -47,6 +47,12 @@ constexpr wchar_t PluginName[] = L"VimPad++";
 void UpdateToggleMenu();
 
 #if !defined(ENABLE_NATIVE_BACKEND)
+void OnSessionFailure()
+{
+    g_bEnabled = false;
+    UpdateToggleMenu();
+}
+
 void SaveView(HWND hWindow)
 {
     int nCurrentView = -1;
@@ -68,6 +74,7 @@ bool InstallViews()
 {
 #if !defined(ENABLE_NATIVE_BACKEND)
     g_xManager.SetSaveHandler(SaveView);
+    g_xManager.SetFailureHandler(OnSessionFailure);
 #endif
     BOOL bMainInstalled   = g_xManager.InstallVim(g_sNpp.hMainScintilla);
     BOOL bSecondInstalled = g_xManager.InstallVim(g_sNpp.hSecondScintilla);

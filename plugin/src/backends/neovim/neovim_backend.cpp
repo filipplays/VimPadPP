@@ -865,7 +865,11 @@ bool Backend_NVIM::StartNeovimProcess()
 }
 void Backend_NVIM::StopAndReportError(const wchar_t *pMessage)
 {
+    if (m_sSession.bFailed)
+        return;
     m_sSession.bFailed = true;
+    if (m_pFailureHandler)
+        m_pFailureHandler(m_pFailureContext);
     StopNeovimProcess();
     MessageBoxW(m_hWindow, pMessage, L"Neovim prototype", MB_OK | MB_ICONERROR);
 }
@@ -1153,6 +1157,8 @@ bool Backend_NVIM::PollResponses()
 }
 bool Backend_NVIM::PassesKeyToHost(WPARAM nKey) const
 {
+    if (m_sSession.bFailed)
+        return true;
     return std::any_of(
         m_aPassThroughKeys.begin(), m_aPassThroughKeys.end(),
         [nKey](const HostKey &sKey) { return sKey.Matches(nKey); });

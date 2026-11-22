@@ -10,11 +10,31 @@ class Manager
     BOOL UninstallVim(HWND hWindow);
     BOOL NotifyCaretMoved(HWND hWindow, LRESULT nPosition);
     void SetSaveHandler(void (*pHandler)(HWND)) { m_pSaveHandler = pHandler; }
+    void SetFailureHandler(void (*pHandler)()) { m_pFailureHandler = pHandler; }
     void ActivateDocument(HWND hWindow, UINT_PTR nBufferId);
     void CloseDocument(UINT_PTR nBufferId);
 
   private:
 #if !defined(ENABLE_NATIVE_BACKEND)
+    struct DispatchScope
+    {
+        explicit DispatchScope(Manager *pManager) : m_pManager(pManager)
+        {
+            if (m_pManager)
+                ++m_pManager->m_nDispatchDepth;
+        }
+        ~DispatchScope()
+        {
+            if (m_pManager)
+                m_pManager->FinishDispatch();
+        }
+        Manager *m_pManager;
+    };
+    static void                  OnBackendFailure(void *pContext);
+    void                         FinishDispatch();
+    unsigned                     m_nDispatchDepth  = 0;
+    bool                         m_bDisabled       = false;
+    bool                         m_bFailurePending = false;
     static LRESULT CALLBACK      KeyboardMessageHook(int nCode, WPARAM wParam, LPARAM lParam);
     static thread_local Manager *s_pKeyboardManager;
     HHOOK                        m_hKeyboardHook = nullptr;
@@ -34,4 +54,5 @@ class Manager
     std::unordered_map<HWND, std::unique_ptr<Backend>> m_aSessions;
 #endif
     void (*m_pSaveHandler)(HWND) = nullptr;
+    void (*m_pFailureHandler)()  = nullptr;
 };

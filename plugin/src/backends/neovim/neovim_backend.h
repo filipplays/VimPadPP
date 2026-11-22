@@ -23,6 +23,11 @@ class Backend_NVIM : public Backend
     void OnCaretMoved(LRESULT nPosition) override;
     bool PassesKeyToHost(WPARAM nKey) const override;
     bool PrepareHostKey() override;
+    void SetFailureHandler(void (*pHandler)(void *), void *pContext)
+    {
+        m_pFailureHandler = pHandler;
+        m_pFailureContext = pContext;
+    }
     void SuspendView();
     bool ResumeView(HWND hWindow);
 
@@ -85,8 +90,10 @@ class Backend_NVIM : public Backend
     };
     Session    m_sSession;
     EditorText m_sEditor;
-    void (*m_pSaveHandler)(HWND)       = nullptr;
-    HWND                 m_hCommandBar = nullptr;
+    void (*m_pSaveHandler)(HWND)           = nullptr;
+    void (*m_pFailureHandler)(void *)      = nullptr;
+    void                *m_pFailureContext = nullptr;
+    HWND                 m_hCommandBar     = nullptr;
     std::string          m_sCommandPrefix;
     std::string          m_sCommandText;
     std::string          m_sMessage;
