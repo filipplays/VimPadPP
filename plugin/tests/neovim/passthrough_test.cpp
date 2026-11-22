@@ -12,9 +12,10 @@
 
 namespace
 {
-int         g_nCommand = 0;
-int         g_nChars   = 0;
-HWND        g_hEditor  = nullptr;
+int         g_nCommand     = 0;
+int         g_nChars       = 0;
+bool        g_bConsumeChar = false;
+HWND        g_hEditor      = nullptr;
 std::string g_sSavedText;
 
 LRESULT CALLBACK HostProc(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam)
@@ -33,7 +34,11 @@ LRESULT CALLBACK HostProc(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lPa
 LRESULT CALLBACK ObserveChars(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
 {
     if (nMessage == WM_CHAR)
+    {
         ++g_nChars;
+        if (g_bConsumeChar)
+            return 0;
+    }
     return DefSubclassProc(hWindow, nMessage, wParam, lParam);
 }
 } // namespace
@@ -194,8 +199,11 @@ int main()
     SetKeyboardState(aState);
     SendMessageW(g_hEditor, WM_KEYDOWN, 'S', 0x001f0001);
     SetKeyboardState(aOriginal);
-    g_nChars = 0;
+    g_nChars       = 0;
+    // Observe the forwarded character without editing the document.
+    g_bConsumeChar = true;
     SendMessageW(g_hEditor, WM_CHAR, 19, 0x001f0001);
+    g_bConsumeChar = false;
     if (g_nChars != 1)
         std::cerr << "Pass chars: " << g_nChars << "\n";
     bOk = (g_nChars == 1) && bOk;
