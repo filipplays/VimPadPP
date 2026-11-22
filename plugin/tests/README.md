@@ -1,23 +1,24 @@
 # Functional tests
 
-The functional suite exercises the shared Vim integration in a standalone harness: a test
+The functional suite tests Vim-style editing in a standalone harness: a test
 executable creates a real Scintilla control, loads `VimMotions.dll`, installs
-the plugin, and sends it the same Windows messages processed during normal
-keyboard input. It then reads Scintilla's document text and caret position to
-check the result.
+the Vim integration, and sends keyboard messages directly to the editor.
+It then reads Scintilla's document text and caret position to check the result.
 
 ## Running the suite
 
-From the `plugin/` directory, run:
+From the repository root, run:
 
 ```sh
-make test
+make -C plugin testnative
+make -C plugin testnvim WAIT_MS=100
 ```
 
-`make test-build` builds the test executable and its runtime DLL dependencies
-without executing tests. `make test` runs the executable through Wine from the
-build directory, so `Scintilla.dll` and `VimMotions.dll` are found next to the
-test executable.
+`make -C plugin test` is an alias for the native suite.
+`make -C plugin test-build` builds the native test executable and its runtime DLL
+dependencies without executing tests. Test targets run the executable through
+Wine from the build directory, so `Scintilla.dll` and `VimMotions.dll` are found
+next to the test executable.
 
 By default, the runner recursively loads every JSON file under `tests/cases/`
 in stable path order, while preserving the case order inside each file. Set
@@ -26,9 +27,12 @@ in stable path order, while preserving the case order inside each file. Set
 wait, visibility, and report options.
 
 The Makefile expects a compatible Windows x64 Scintilla DLL at
-`dependencies/scintilla/Scintilla.dll`. The build also requires the MinGW
-x86-64 C++ compiler and Python 3; running it requires Wine. `make test` formats
-all JSON fixtures under `tests/cases/` before building.
+`plugin/dependencies/scintilla/Scintilla.dll`. The build also requires the MinGW
+x86-64 C++ compiler and Python 3; running it requires Wine. Neovim tests also
+need the Windows Neovim distribution described in the build guide. Functional
+test targets format all JSON fixtures under `plugin/tests/cases/`, even when
+`TEST_PATH` selects one file. Unless stated otherwise, paths below are relative
+to `plugin/`; shell commands run from the repository root.
 
 ## Test cases
 
@@ -97,7 +101,7 @@ VimMotionsTests.exe <test-case-file-or-directory> <report-directory> [--visible]
 
 ## Reports and exit codes
 
-Each `make test` run writes these generated files under
+Each functional run writes these generated files under
 `tests/functional/tmp/reports/` by default:
 
 - `functional-report.txt` is the human-readable summary and diagnostics.
@@ -106,7 +110,14 @@ Each `make test` run writes these generated files under
 The executable returns `0` when every case passes, `1` when any case fails,
 and `2` for setup, parsing, or report-writing failures.
 
-## Neovim state protocol checks
+## Focused Neovim checks
+
+The checks below have no Makefile targets and are separate from the JSON suite.
+Python checks use local Neovim. Windows integration checks need Wine and the
+built Windows DLLs. Coverage described here comes from the test code; a passing
+check does not establish that the same behavior works inside Notepad++.
+
+### State protocol
 
 These focused checks do not format fixtures or write build outputs into the
 repository. From the repository root:
@@ -123,8 +134,10 @@ clang++ -std=c++20 -Wall -Wextra -Wpedantic -fsanitize=address,undefined \
 python3 plugin/tests/neovim/state_snapshot_test.py
 ```
 
-The framing test covers fragmented and coalesced MessagePack frames, all tag
-families, large payloads, nesting limits, and invalid frames. The line-update
+The framing test covers fragmented and coalesced MessagePack frames, encoding
+and decoding at 65,535/65,536/65,537 elements, all tag families, large payloads,
+nesting limits, invalid frames, aggregate value counts, and shared decoding
+budgets for nested containers and strings. The line-update
 test compares byte-range replacements with independent line-array splices
 across LF, CRLF, CR, Unicode bytes, EOF insertions/deletions, trailing empty
 lines, and empty documents.
@@ -151,17 +164,17 @@ system temporary directory. It checks missing files, empty/default settings,
 changed settings, invalid Lua, unknown options, invalid list types and sparse
 lists. Key-name parsing is checked separately by the Windows test below.
 
-Compile the focused Windows checks from `plugin/`, putting outputs in an
-isolated temporary directory:
+Compile the focused Windows checks from the repository root, putting outputs
+in a temporary directory:
 
 ```sh
 x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic \
-  -Isrc/backends/common tests/neovim/host_key_test.cpp \
+  -Iplugin/src/backends/common plugin/tests/neovim/host_key_test.cpp \
   -o /private/tmp/HostKeyTests.exe -static -static-libgcc -static-libstdc++
 wine /private/tmp/HostKeyTests.exe
 
 x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic \
-  -Isrc/backends/common tests/neovim/passthrough_test.cpp \
+  -Iplugin/src/backends/common plugin/tests/neovim/passthrough_test.cpp \
   -o /private/tmp/PassthroughTests.exe -lcomctl32 -static -static-libgcc -static-libstdc++
 ```
 
@@ -179,11 +192,11 @@ well as shared-view attachment, compile the same test directly with the backend:
 ```sh
 x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic \
   -DTEST_DOCUMENT_MANAGER -DVIM_MOTIONS_BUILD \
-  -Isrc/backends/common -Isrc/backends/neovim \
-  tests/neovim/passthrough_test.cpp src/backends/common/backend_manager.cpp \
-  src/backends/common/backend_common.cpp src/backends/common/editor_text.cpp \
-  src/backends/common/scintilla_editor.cpp src/backends/common/helpers.cpp \
-  src/backends/neovim/neovim_backend.cpp -o /private/tmp/DocumentManagerTests.exe \
+  -Iplugin/src/backends/common -Iplugin/src/backends/neovim \
+  plugin/tests/neovim/passthrough_test.cpp plugin/src/backends/common/backend_manager.cpp \
+  plugin/src/backends/common/backend_common.cpp plugin/src/backends/common/editor_text.cpp \
+  plugin/src/backends/common/scintilla_editor.cpp plugin/src/backends/common/helpers.cpp \
+  plugin/src/backends/neovim/neovim_backend.cpp -o /private/tmp/DocumentManagerTests.exe \
   -lcomctl32 -static -static-libgcc -static-libstdc++
 ```
 
@@ -196,8 +209,66 @@ that configured shortcuts reach the host without waiting for pending edits, extr
 modifiers do not match, Ctrl+V still belongs to Neovim, and translated
 characters pass through even after Ctrl is released. It also checks that
 subsequent ordinary input returns to Neovim, and a pending `f` survives switching
-Scintilla documents while another document is edited independently. The test does not load Notepad++
-or verify its actual tab switching, menu commands, or two-view lifecycle.
+Scintilla documents while another document is edited independently. The test
+does not load Notepad++ or verify its actual tab switching, menu commands, or
+two-view lifecycle.
+
+## RPC transport and bootstrap configuration
+
+Build the backend and the Windows RPC harness from the repository root:
+
+```sh
+make -C plugin nvim
+x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic -Wno-cast-function-type \
+  -Iplugin/src/backends/common -Iplugin/src/backends/neovim \
+  plugin/tests/neovim/rpc_transport_test.cpp \
+  -o plugin/build/windows-x64/neovim-build/RpcTransportTests.exe \
+  -static -static-libgcc -static-libstdc++
+x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic -DRPC_TEST_PEER \
+  -Iplugin/src/backends/neovim plugin/tests/neovim/rpc_transport_test.cpp \
+  -o /private/tmp/VimPadRpcPeer.exe -static -static-libgcc -static-libstdc++
+python3 plugin/tests/neovim/rpc_transport_test.py
+python3 plugin/tests/neovim/bootstrap_config_test.py
+```
+
+The RPC runner stages temporary runtimes; it never replaces the real Neovim
+executable or existing init files. It checks installation and authoritative host
+replacement at 65,535, 65,536, and 65,537 lines against real Neovim. A separate
+faulty peer checks a full input pipe, no response, continuous notifications,
+slow partial replies, oversized array headers, aggregate value rejection, and
+invalid asynchronous input. Timeout cases must fail within 7.5 seconds including
+startup and process cleanup; malformed input must fail within 2.5 seconds.
+Each failure checks preserved host text, usable ordinary editing, and no live
+child process. Use `--cases large` or another case name to select a subset.
+
+The bootstrap check runs the actual staging script and source bootstrap with
+local headless Neovim. It covers Vimscript-only bundled configuration, Lua
+precedence when both bundled files exist, later `config/` overrides, preserved
+init files, and configuration errors. These checks do not run Notepad++ itself.
+
+## Neovim failure cleanup
+
+From the repository root, build the backend and the focused plugin-DLL test:
+
+```sh
+make -C plugin nvim
+x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic -Wno-cast-function-type \
+  -Iplugin/src/backends/common plugin/tests/neovim/failure_cleanup_test.cpp \
+  -o plugin/build/windows-x64/neovim-build/FailureCleanupTests.exe \
+  -static -static-libgcc -static-libstdc++
+cd plugin/build/windows-x64/neovim-build
+wine FailureCleanupTests.exe
+```
+
+This loads the actual `VimPad++.dll` into a small host implementing the required
+Notepad++ messages. It terminates a test-owned Neovim process and checks global
+cleanup across two views and an inactive document, input routing during the
+error dialog, the menu checkmark, Ctrl+F reaching its host accelerator exactly
+once, preserved text and ordinary editing in both views, and fresh sessions
+after re-enabling. A second failure is detected inside the keyboard hook and
+checks that the triggering shortcut also reaches the host. It also checks that
+ordinary input does not recreate sessions while disabled. It does not run
+Notepad++ itself.
 
 ## Neovim mouse selections
 
@@ -213,7 +284,10 @@ transitions using a local embedded Neovim.
 
 The Windows integration test sends mouse messages to real Scintilla and checks
 selection persistence while polling, release, and deletion immediately after
-release. Build the backend, then compile and run the test alongside its DLLs:
+release. It also checks that the first gesture cancels incomplete commands
+without moving the selection, the next gesture works, and ordinary clicks still
+work with a state response pending. Build the backend, then compile and run the
+test alongside its DLLs:
 
 ```sh
 make -C plugin nvim
@@ -221,9 +295,29 @@ x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic -Wno-cast-function-ty
   -Iplugin/src/backends/common plugin/tests/neovim/mouse_selection_test.cpp \
   -o plugin/build/windows-x64/neovim-build/MouseSelectionTests.exe \
   -static -static-libgcc -static-libstdc++
-cd plugin/build/windows-x64/neovim-build
-wine MouseSelectionTests.exe
+(cd plugin/build/windows-x64/neovim-build && wine MouseSelectionTests.exe)
 ```
 
 The test uses the staged Neovim configuration. It covers ordinary stream
 selections, not rectangular/multiple selections or Notepad++ lifecycle behavior.
+
+## Neovim UI and keyboard integration
+
+`tests/neovim/main.cpp` checks caret styles, character/line/block Visual
+selections, Enter and Backspace, Ctrl+W, Ctrl+V routing past a host accelerator,
+and search-result visibility after wrapping, zooming, and resizing. It also
+checks that uninstall restores the scrolling policy.
+
+Build and run it from the repository root:
+
+```sh
+make -C plugin nvim
+x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic -Wno-cast-function-type \
+  -Iplugin/src/backends/common plugin/tests/neovim/main.cpp \
+  -o plugin/build/windows-x64/neovim-build/NeovimIntegrationTests.exe \
+  -static -static-libgcc -static-libstdc++
+(cd plugin/build/windows-x64/neovim-build && wine NeovimIntegrationTests.exe)
+```
+
+This uses the staged Neovim configuration and a real Scintilla control. It does
+not load Notepad++.

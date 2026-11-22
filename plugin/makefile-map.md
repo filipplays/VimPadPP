@@ -1,13 +1,14 @@
 # Makefile map
 
-A visual companion to [makefile-commands.md](makefile-commands.md). Run the
-commands from `plugin/`; arrows show what each target uses or launches.
+A visual companion to [makefile-commands.md](makefile-commands.md). From the
+repository root, run `make -C plugin <target>`. Arrows show what each target
+uses or launches; paths below are relative to `plugin/`.
 
 ## Build and launch
 
 ```mermaid
 flowchart TD
-    ALL["make / make all"] --> NATIVE["native"] & NVIM["nvim"]
+    ALL["all (default target)"] --> NATIVE["native"] & NVIM["nvim"]
     NATIVE --> NFILES["Native DLLs + Scintilla files"]
     NVIM --> VFILES["Neovim host + DLLs + Scintilla files"]
     NVIM --> STAGE["stagenvim: copy Neovim distribution"]
@@ -29,7 +30,7 @@ suffix, not which backend a target builds.
 flowchart LR
     TN["test / testnative"] --> RT["run-tests"]
     TV["testnvim"] --> RT
-    RT --> FORMAT["Format tests/cases/*.json"]
+    RT --> FORMAT["Format all JSON files below tests/cases/"]
     RT --> CASES["TEST_PATH: file or directory"]
     RT --> REPORT["TEST_REPORT_DIR: text + JSON reports"]
     FN["fuzznative / fuzznvim"] --> FUZZ["Differential fuzz runner"]
@@ -42,8 +43,9 @@ flowchart LR
 `WAIT_MS` controls the fixed delay before each functional result is checked;
 `VISIBLE=1` shows the test window. The test runner writes to
 `tests/functional/tmp/reports/` by default. Fuzzing has its own temporary
-directory and replaces the previous fuzz run. The separate
-`tests/neovim/main.cpp` integration test has no Makefile target.
+directory and replaces the previous fuzz run. Focused checks under
+`tests/neovim/` have no Makefile targets. See the
+[test guide](tests/README.md#focused-neovim-checks) for their commands and coverage.
 
 Replay requires `CASE=<id>`; `REPLAY_CASES=<json-file>` defaults to
 `tests_fuzzing/tmp/cases/generated.json`. `replay` selects the native backend.

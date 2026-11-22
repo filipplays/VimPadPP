@@ -1,7 +1,6 @@
 # Project context
 
-The project is named **VimPad++**. Its GitHub repository uses the `VimPadPP`
-slug because GitHub repository names cannot contain `+`.
+The project is named **VimPad++**. Its repository is named `VimPadPP`.
 
 The project provides Vim-style editing for Notepad++ and a standalone
 Scintilla host. It has a native Vim engine and a backend that uses a Neovim
@@ -20,15 +19,17 @@ integration with a real Scintilla control. The
 comparison, its generated files, and current limitations. Neither suite
 exercises the Notepad++ plugin lifecycle.
 
-Earlier planning explored strong Neovim editing compatibility alongside an
-independent native backend, with a user-facing choice of backend. Runtime
-selection is not implemented; its priority and details remain open. The notes
-also identified questions about safe switching and state preservation,
-document and undo ownership, external edits, Unicode and selections, multiple
-views, recovery after process failure, and support for Neovim configuration,
-plugins, and UI features. These are areas to investigate, not promises of
-support. Treat current code and tests as evidence of implementation, not proof
-of a broader product requirement.
+Each build selects one backend. Users cannot switch backends at runtime.
+The Neovim backend keeps a separate process for each activated document; cloned
+views share that document's process. See the
+[document-session decision](decisions/neovim-document-sessions.md) for the
+reasoning and tradeoffs.
+
+External edits, undo behavior, Unicode and selections, multiple views, process
+failure, and Neovim plugins still need broader integration coverage. The
+[review findings](neovim-review-findings.md) describe known concerns and open
+questions. Existing tests cover specific cases and do not establish full Vim or
+Neovim compatibility.
 
 Dependencies are Git-ignored and may not be available in another checkout. The
 Neovim build also references `plugin/src/neovim_init.lua`; check that this file

@@ -1,14 +1,13 @@
 # Makefile commands
 
-Build, run, and test the plugin from the `plugin/` directory:
+Run these commands from the repository root:
 
 ```sh
-cd plugin
-make native
+make -C plugin native
 ```
 
-From the repository root, use `make -C plugin <target>` instead. Use
-`make -n <target>` to preview commands without running them.
+Use `make -C plugin -n <target>` to preview commands without running them.
+Relative paths passed to Make are resolved from `plugin/`.
 
 ## Prerequisites
 
@@ -26,15 +25,15 @@ Relative paths are resolved from `plugin/`.
 
 | Command | What it does |
 | --- | --- |
-| `make` or `make all` | Build both backend sets. |
-| `make native` | Build the native DLLs and copy the Scintilla dependencies. |
-| `make nvim` | Build the Neovim host and DLLs and stage its dependencies. |
-| `make runscintillanative` | Build and launch the native Scintilla host. |
-| `make runscintillanvim` | Build and launch the Neovim Scintilla host. |
-| `make installnative` / `make installnvim` | Build and install the selected Notepad++ plugin. |
-| `make runnotepadnative` / `make runnotepadnvim` | Install the selected plugin, then launch Notepad++. |
-| `make runnotepad` | Launch the configured Notepad++ without building or installing. |
-| `make runscintilla` | Launch an existing host without building it. |
+| `make -C plugin` or `make -C plugin all` | Build both backend sets. |
+| `make -C plugin native` | Build the native DLLs and copy the Scintilla dependencies. |
+| `make -C plugin nvim` | Build the Neovim host and DLLs and stage its dependencies. |
+| `make -C plugin runscintillanative` | Build and launch the native Scintilla host. |
+| `make -C plugin runscintillanvim` | Build and launch the Neovim Scintilla host. |
+| `make -C plugin installnative` / `make -C plugin installnvim` | Build and install the selected Notepad++ plugin. |
+| `make -C plugin runnotepadnative` / `make -C plugin runnotepadnvim` | Install the selected plugin, then launch Notepad++. |
+| `make -C plugin runnotepad` | Launch the configured Notepad++ without building or installing. |
+| `make -C plugin runscintilla` | Launch an existing host without building it. |
 
 For `runscintilla`, `RUN_SCINTILLA_APP` selects the executable; its default is
 the native host in the selected build directory. `stagenvim` copies the Neovim
@@ -51,19 +50,50 @@ The install targets write to `NOTEPADPP_PLUGIN_DIR`; `runnotepad` uses
 `NOTEPADPP_EXE`. Override either path as needed:
 
 ```sh
-make installnvim NOTEPADPP_PLUGIN_DIR='/path/to/Notepad++/plugins/VimPad++'
-make runnotepad NOTEPADPP_EXE='/path/to/notepad++.exe'
+make -C plugin installnvim NOTEPADPP_PLUGIN_DIR='/path/to/Notepad++/plugins/VimPad++'
+make -C plugin runnotepad NOTEPADPP_EXE='/path/to/notepad++.exe'
 ```
 
 Restart an already-running Notepad++ after installing a new DLL.
 
+## Neovim configuration
+
+Paths below are relative to the directory containing `VimPad++.dll` in
+Notepad++, or `VimMotions.dll` in the standalone host:
+
+| File | Purpose |
+| --- | --- |
+| `neovim/vim-motions-init.lua` | Bootstrap loaded when the embedded process starts. |
+| `neovim/init.lua` | Settings loaded first. The Notepad++ **Open Neovim config** command opens this file. |
+| `neovim/init.vim` | Vimscript fallback loaded first when `neovim/init.lua` is absent. |
+| `config/init.lua` or `config/init.vim` | Optional user settings loaded afterward. Keep only one of these files. |
+| `config/vimpad.lua` | VimPad++ settings, separate from Neovim options and mappings. |
+
+The bootstrap adds `config/` and `config/after/` to Neovim's runtime search path.
+When both bundled init files exist, `neovim/init.lua` takes precedence. Errors
+in either loaded init file are reported during startup. Existing staged bootstrap
+files are preserved; copy the updated `src/neovim_init.lua` as described above
+to apply bootstrap changes to an existing runtime.
+
+For example, `config/vimpad.lua` can let the host handle save and tab shortcuts:
+
+```lua
+return {passthrough_keys = {"<C-s>", "<C-Tab>", "<C-S-Tab>"}}
+```
+
+With no file, the passthrough list is empty. Invalid settings prevent the backend
+from starting. In Notepad++, **Reload VimPad++ and Neovim configs** restarts the
+document sessions and reloads their settings. Pending Vim commands and state
+held only in Neovim are discarded; the visible Scintilla text is retained.
+The native backend does not load these settings.
+
 ## Functional tests
 
 ```sh
-make testnative                         # Native backend; make test is an alias
-make testnvim WAIT_MS=100               # Neovim backend
-make testnvim TEST_PATH=tests/cases/vim_word_cases.json WAIT_MS=100
-make testnative TEST_PATH=tests/cases VISIBLE=1
+make -C plugin testnative              # Native backend; test is an alias
+make -C plugin testnvim WAIT_MS=100     # Neovim backend
+make -C plugin testnvim TEST_PATH=tests/cases/vim_word_cases.json WAIT_MS=100
+make -C plugin testnative TEST_PATH=tests/cases VISIBLE=1
 ```
 
 | Option | Default | Purpose |
@@ -79,22 +109,25 @@ Reports are overwritten on each run, including runs for different backends.
 
 **Fixture formatting:** `testnative`, `testnvim`, and `test-build` run
 `format-test-cases` first. This formats **all** JSON files under `tests/cases`,
-even when `TEST_PATH` selects a single file. `make format-test-cases` runs the
-formatter by itself. `make test-build` formats the cases and builds the native
-runner and dependencies without running the tests.
+even when `TEST_PATH` selects a single file. `make -C plugin format-test-cases`
+runs the formatter by itself. `make -C plugin test-build` formats the cases and
+builds the native runner and dependencies without running the tests.
 
 ## Fuzzing
 
 ```sh
-make fuzznative                         # make fuzz is a native alias
-make fuzznvim
-make fuzz-seed-native SEED=123          # make fuzz-seed is a native alias
-make fuzz-seed-nvim SEED=123
+make -C plugin fuzznative              # fuzz is a native alias
+make -C plugin fuzznvim
+make -C plugin fuzz-seed-native SEED=123 # fuzz-seed is a native alias
+make -C plugin fuzz-seed-nvim SEED=123
 ```
 
-Fuzzing compares generated word motions against local Neovim and replaces the
-previous contents of `tests_fuzzing/tmp/`. `make fuzz-build` only builds the
-native test runner and its DLL dependencies.
+Fuzzing compares generated operator, motion, and paste sequences against local
+Neovim. The comparison has [known limits](tests_fuzzing/README.md#current-coverage-and-limitations),
+including expected text that is not taken from Neovim. Each run replaces
+`plugin/tests_fuzzing/tmp/` and removes `plugin/.nvimlog` if it exists.
+`make -C plugin fuzz-build` only builds the native test runner and its DLL
+dependencies.
 
 ## Replay a test case
 
@@ -102,9 +135,9 @@ Replay opens a case's initial text and caret in the selected Scintilla host.
 You can then enter the case's keys yourself to debug it.
 
 ```sh
-make replay CASE='motion.word_forward'
-make replaynative CASE='motion.word_forward' REPLAY_CASES=tests/cases/vim_word_cases.json
-make replaynvim CASE='motion.word_forward' REPLAY_CASES=tests/cases/vim_word_cases.json
+make -C plugin replay CASE='motion.word_forward' REPLAY_CASES=tests/cases/vim_word_cases.json
+make -C plugin replaynative CASE='motion.word_forward' REPLAY_CASES=tests/cases/vim_word_cases.json
+make -C plugin replaynvim CASE='motion.word_forward' REPLAY_CASES=tests/cases/vim_word_cases.json
 ```
 
 `replay` is an alias for `replaynative`. Both backend-specific targets build
@@ -116,7 +149,7 @@ their host and dependencies; `replaynvim` also stages Neovim.
 | `REPLAY_CASES` | No | Path to one JSON file containing the case. Defaults to `tests_fuzzing/tmp/cases/generated.json`, relative to `plugin/`. |
 
 The default file is generated by fuzzing, so it must exist before replaying
-from it. To launch an already-built host directly, use `make run-replay` with
+from it. To launch an already-built host directly, use `make -C plugin run-replay` with
 the same parameters and optionally set `REPLAY_APP` to its executable path.
 `REPLAY_APP` defaults to the native host; this shared target does not build or
 stage its runtime dependencies.
@@ -130,8 +163,8 @@ the backend implementation.
 
 | Command | What it does |
 | --- | --- |
-| `make package` | Replace the native host staging folder and ZIP under `dist/`. Requires `zip` and `../README.md`. |
-| `make clean` | Remove `build/`. Reports under `tests/functional/tmp/` and `dist/` remain. |
+| `make -C plugin package` | Replace the native host staging folder and ZIP under `plugin/dist/`. Requires `zip` and the root `README.md`. |
+| `make -C plugin clean` | Remove `plugin/build/`. Reports under `plugin/tests/functional/tmp/` and packages under `plugin/dist/` remain. |
 
 See [makefile-map.md](makefile-map.md) for the build and test relationships,
 [tests/README.md](tests/README.md) for fixture details, and

@@ -6,7 +6,8 @@
   and attaches the integration to the host's Scintilla views.
 - `plugin/src/main.cpp` is the standalone Scintilla host.
 - `plugin/src/backends/common/` contains the `Manager`, the `Backend`
-  interface, and Scintilla/editor-text helpers. `Manager` subclasses installed Scintilla windows to route messages. Native
+  interface, and Scintilla/editor-text helpers. `Manager` intercepts messages
+  for installed Scintilla windows using a window subclass. Native
   sessions belong to windows; Neovim sessions belong to Scintilla documents.
 - `plugin/src/backends/native/` implements the native backend and `VimEngine`.
   The engine's commands, motions, actions, and operators are split across
@@ -30,8 +31,9 @@ backend passes relevant keyboard input to `VimEngine`; the Neovim backend
 communicates with its process and applies state to the editor. Shared editor
 helpers wrap Scintilla messages.
 
-The Neovim manager creates a session on a document's first activation (or first
-input in the standalone host), and retains it across tab switches. Each document
+For the Neovim backend, the manager creates a session on a document's first
+activation (or first input in the standalone host) and keeps it across tab
+switches. Each document
 has its own embedded Neovim process; clones in both views share that process.
 A session is attached to one view at a time, transferring on focus/input.
 Inactive sessions retain their pipes, pending requests, and Vim input state, but
@@ -40,6 +42,14 @@ again; inactive documents do not receive background edits. Document references
 prevent Scintilla pointer reuse until session cleanup. Notepad++ buffer activation
 records the buffer identity, and the final close notification releases the session.
 Disabling the plugin or shutting down releases all sessions.
+
+A Neovim session failure disables VimPad++ globally. Input routing stops as
+soon as the backend reports failure, so host shortcuts remain available during
+the error dialog. The manager waits for its outermost dispatch to return before
+releasing every session, document reference, view subclass, and keyboard hook;
+this avoids destroying a backend during a reentrant callback. The Notepad++
+integration then clears its enabled flag and menu checkmark. Visible host text
+survives, and enabling VimPad++ again creates fresh sessions from that text.
 
 Each Neovim backend session starts its own embedded Neovim process
 and exchanges MessagePack-RPC messages over standard input and output pipes.
@@ -53,27 +63,36 @@ The process starts with the staged `vim-motions-init.lua`. That bootstrap
 loads bundled defaults and then an optional user configuration. Its buffer
 write handler sends a save notification to the host, which performs the save
 after pending state has been applied. Normal response polling uses a timer;
-startup and authoritative host-to-Neovim synchronization also make blocking
-RPC calls, whose pipe reads have a five-second timeout.
+startup and synchronization that replaces Neovim text with the host's text also
+make blocking RPC calls. Each blocking RPC has one five-second deadline shared
+by its write, partial reads, and intervening notifications. Parent-to-child writes
+use an overlapped named pipe and cancel pending I/O on timeout. Other input writes
+also have a five-second deadline. Response polling limits each timer turn to
+128 messages or ten milliseconds of reading, so a notification stream yields
+back to the host.
 
 The Neovim backend separately evaluates `config/vimpad.lua` through its existing
-Lua RPC connection at installation. This returned table holds plugin settings;
-`init.lua` and `init.vim` remain ordinary Neovim configuration. A missing plugin
-config uses empty defaults. Invalid settings fail installation with an error.
+Lua RPC connection when the backend is installed on an editor. The file returns
+a table of plugin settings. A missing file uses empty defaults; invalid settings
+stop backend setup with an error. Neovim options and mappings go in its init
+files. See the [configuration paths](../plugin/makefile-commands.md#neovim-configuration).
 The shared manager's message hook checks each session's configured physical
-shortcuts before intercepting Ctrl accelerators. Configured shortcuts immediately continue through the host accelerator path.
+shortcuts before intercepting Ctrl accelerators. Configured shortcuts go straight
+to the host's shortcut handling.
 Saving writes the current Scintilla text, even if Neovim is waiting for a mapping
-or motion character. Later applied edits make the document modified again. The backend also passes their keydown and
-translated character messages through to Scintilla when no accelerator claims
-them. Refresh releases all document sessions and recreates the visible sessions, reloading both configurations. The native
-backend currently has no plugin-config loader.
+or motion character. Later applied edits make the document modified again.
+If no host shortcut handles the key, its keydown and translated character
+messages pass through to Scintilla. Reloading configurations releases all document
+sessions and recreates the visible sessions. This also discards pending Vim input
+in those sessions. The native backend currently has no plugin-config loader.
 
 The Neovim state helper is installed during authoritative host-to-Neovim
 synchronization. Per-key requests invoke it with the last applied buffer,
 `changedtick`, journal epoch, and edit sequence. The nine-field result is
 `[buffer, changedtick, epoch, base-sequence, sequence, kind, payload, cursor,
-[mode, visual-anchor, selection-option]]`. Kind 0 omits text, kind 1 carries a full line snapshot,
-and kind 2 carries ordered `[sequence, first-line, last-line, replacement-lines]`
+[mode, visual-anchor, selection-option]]`. Kind 0 omits text, kind 1 carries a
+full line snapshot, and kind 2 carries ordered
+`[sequence, first-line, last-line, replacement-lines]`
 updates. Line ranges are zero-based and end-exclusive; `[-1, -1, []]` marks a
 sequence entry where only `changedtick` advanced.
 
@@ -89,12 +108,14 @@ callbacks independently of buffer ticks.
 
 The host validates an entire update batch against the acknowledged baseline
 and evolving line count before applying it. It maps line boundaries through
-Scintilla, preserves the document's selected line-ending convention, and
+Scintilla, uses one line-ending style for replacement text, and
 limits prefix/suffix comparisons to replacement ranges. Both editors retain
 one empty logical line after a delete-all update. Full recovery snapshots use
 the same replacement helper over the whole document. Existing full-text
 Scintilla comparisons still protect against external edits; this path does
-not yet replace those checks with modification notifications.
+not yet replace those checks with modification notifications. Mixed line endings
+can change during replacement; see the
+[line-ending review finding](neovim-review-findings.md#7-p2-edits-silently-change-existing-mixed-line-endings).
 
 The acknowledged buffer/tick/epoch/sequence advances only after text and
 cursor/selection state are applied, or after authoritative Scintilla text is
@@ -103,7 +124,12 @@ a mismatched delta baseline requests a full snapshot. The host's input revision
 counters remain separate and continue to reject outdated state replies.
 
 Ordinary mouse selections are owned by Scintilla until button release or loss
-of mouse capture. The backend drains pending edits before the gesture, ignores
+of mouse capture. Before a gesture, the backend queries Neovim's fast
+`nvim_get_mode` API, which responds even while a state request waits for input.
+Blocking input, an unfinished operator, or a command-line entry consumes the
+first click solely to cancel the command, including any drag and release.
+The next gesture proceeds normally. An outstanding state reply alone does not
+consume a click. The backend drains pending edits before the gesture, ignores
 caret notifications generated during it, and rejects state replies that could
 restore an older selection. It samples the final anchor and caret after
 Scintilla processes the mouse message, including in the standalone host.
@@ -113,11 +139,15 @@ direction and accounts for Neovim's inclusive/exclusive selection option and
 Scintilla's half-open byte positions. Rectangular and multiple selections are
 outside this path. An empty click preserves Insert mode or exits Visual mode.
 
-Incoming asynchronous RPC bytes pass through a persistent MessagePack frame
+Incoming RPC bytes, including blocking calls, pass through a persistent MessagePack frame
 scanner before value decoding. It preserves progress across pipe chunks and
 skips payload bytes without constructing values. Complete messages are decoded
-once; malformed or oversized frames fail communication. The existing response
-timer still schedules polling.
+once. Arrays use `array16` or `array32` according to their length. Frames are
+limited to 32 MiB, individual payloads to 16 MiB, and complete value trees to
+524,288 values. Decoding additionally budgets 64 MiB for value storage and
+string payloads across the whole tree; allocation failure becomes an ordinary
+communication failure. Documents exceeding these response limits fail cleanly.
+The existing response timer still schedules polling.
 
 ## Verification boundaries
 
@@ -135,5 +165,5 @@ subclass while bypassing Notepad++ keyboard routing and shortcuts; exercise
 the normal application input path as well when testing those interactions.
 
 Build and test targets write files. Functional test targets format all JSON
-fixtures; fuzzing replaces generated output and may remove `.nvimlog`. Review
-the linked guides and obtain required authorization before running them.
+fixtures; fuzzing replaces generated output and may remove `plugin/.nvimlog`.
+Follow the authorization rules in [AGENTS.md](../AGENTS.md) before running them.
