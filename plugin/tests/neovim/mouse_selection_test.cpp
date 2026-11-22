@@ -30,6 +30,17 @@ LPARAM Point(HWND hEditor, LRESULT nPosition)
     const LRESULT nY = SendMessageW(hEditor, Scintilla::POINTYFROMPOSITION, 0, nPosition);
     return MAKELPARAM(nX, nY + 3);
 }
+void SeparateClick(HWND hEditor)
+{
+    // Scintilla uses GetMessageTime() for multi-click detection, including for
+    // sent mouse messages. Advance the queue timestamp after the system's
+    // double-click interval so independent test gestures stay independent.
+    Sleep(GetDoubleClickTime() + 20);
+    PostMessageW(hEditor, WM_NULL, 0, 0);
+    MSG sMessage{};
+    if (PeekMessageW(&sMessage, hEditor, WM_NULL, WM_NULL, PM_REMOVE))
+        DispatchMessageW(&sMessage);
+}
 bool Selection(HWND hEditor, LRESULT nAnchor, LRESULT nCaret)
 {
     const LRESULT nActualAnchor = SendMessageW(hEditor, Scintilla::GETANCHOR, 0, 0);
@@ -88,6 +99,7 @@ int main()
                 // the session survived and the pending command was cancelled.
                 const LRESULT nAnchor = bDrag ? 1 : 3;
                 const LRESULT nCaret  = bDrag ? 4 : 3;
+                SeparateClick(hEditor);
                 SendMessageW(hEditor, WM_LBUTTONDOWN, MK_LBUTTON, Point(hEditor, nAnchor));
                 if (bDrag)
                     SendMessageW(hEditor, WM_MOUSEMOVE, MK_LBUTTON, Point(hEditor, nCaret));
@@ -117,6 +129,7 @@ int main()
             return 2;
         Pump(100);
         SendMessageW(hEditor, WM_CHAR, nInitialKey, 0);
+        SeparateClick(hEditor);
         SendMessageW(hEditor, WM_LBUTTONDOWN, MK_LBUTTON, Point(hEditor, 3));
         SendMessageW(hEditor, WM_LBUTTONUP, 0, Point(hEditor, 3));
         Pump(50);
@@ -176,6 +189,7 @@ int main()
         }
         // A pending state reply must not erase the new mouse selection.
         SendMessageW(hEditor, WM_CHAR, 'l', 0);
+        SeparateClick(hEditor);
         SendMessageW(hEditor, WM_LBUTTONDOWN, MK_LBUTTON, Point(hEditor, sCase.nAnchor));
         Pump(30);
         SendMessageW(hEditor, WM_MOUSEMOVE, MK_LBUTTON, Point(hEditor, sCase.nCaret));
