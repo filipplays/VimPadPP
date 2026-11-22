@@ -237,3 +237,6 @@ package: native $(APP)
 
 clean:
 	rm -rf build
+
+analysis:
+	cppcheck --xml -I ./include ./src 2> build/analysis.xml
