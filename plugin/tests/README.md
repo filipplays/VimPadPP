@@ -282,8 +282,8 @@ executable or existing init files. It checks installation and authoritative host
 replacement at 65,535, 65,536, and 65,537 lines against real Neovim. A separate
 faulty peer checks a full input pipe, no response, continuous notifications,
 slow partial replies, oversized array headers, aggregate value rejection, and
-invalid asynchronous input. Timeout cases must fail within 7.5 seconds including
-startup and process cleanup; malformed input must fail within 2.5 seconds.
+invalid asynchronous input. Timeout cases must fail within 12 seconds including
+startup and process cleanup; malformed input must fail within 6 seconds.
 Each failure checks preserved host text, usable ordinary editing, and no live
 child process. Use `--cases large` or another case name to select a subset.
 

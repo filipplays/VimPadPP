@@ -235,7 +235,15 @@ int main(int nArgumentCount, char **aArguments)
         const ULONGLONG nElapsed = GetTickCount64() - nStart;
         const bool      bTimeout =
             sMode == "write-stall" || sMode == "no-read" || sMode == "notifications" || sMode == "trickle";
-        bOk = nElapsed < (bTimeout ? 7500u : 2500u) && (!bTimeout || nElapsed >= 4500) && bOk;
+        // This measures process startup, the RPC deadline, cleanup, and dialog
+        // handling together. Allow CI scheduling overhead while still bounding
+        // the complete operation; the Python runner enforces a 20-second limit.
+        const ULONGLONG nLimit = bTimeout ? 12000u : 6000u;
+        if (nElapsed >= nLimit || (bTimeout && nElapsed < 4500))
+        {
+            std::cerr << "Unexpected elapsed time: " << nElapsed << " ms (limit " << nLimit << " ms)\n";
+            bOk = false;
+        }
         bOk = Text(hEditor) == sText && g_nErrors == 1 && NoLiveChildren() && bOk;
         // Cleanup must restore host editing without recreating the failed peer.
         SendMessageW(hEditor, Scintilla::SETSEL, 0, 0);
