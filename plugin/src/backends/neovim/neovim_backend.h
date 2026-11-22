@@ -66,6 +66,8 @@ class Backend_NVIM : public Backend
         unsigned                 nRevision          = 0;
         unsigned                 nStateRevision     = 0;
         unsigned                 nCaretId           = 0;
+        unsigned                 nModeId            = 0;
+        bool                     bInputPending      = false;
         UINT_PTR                 nTimer             = 0;
         LRESULT                  nKnownCaret        = 0;
         LRESULT                  nRequestedCaret    = 0;
@@ -94,6 +96,7 @@ class Backend_NVIM : public Backend
     bool                 m_bCommandVisible    = false;
     bool                 m_bMouseSelecting    = false;
     bool                 m_bMouseFinishing    = false;
+    bool                 m_bMouseCancelled    = false;
     unsigned             m_nMouseDepth        = 0;
     bool                 m_bSyncSelection     = false;
     unsigned             m_nSelectionRevision = 0;
@@ -131,6 +134,7 @@ class Backend_NVIM : public Backend
     bool        SyncNeovim(const std::string &sText, LRESULT nLine, LRESULT nColumn);
     bool        RequestCaretSync();
     void        FinishMouseSelection();
+    bool        PrepareMouseSelection(bool &bCancelled);
     bool        SendKey(const std::string &sKey);
     std::string GetEditorText();
     bool        ContainsNoNulBytes(const std::string &sText);

@@ -971,6 +971,35 @@ bool Backend_NVIM::PollResponses()
         if (sResponse.nType != 3 || sResponse.aItems.size() != 4 || sResponse.aItems[0].nInteger != 1 ||
             sResponse.aItems[2].nType != 0)
             return false;
+        if (m_sSession.nModeId && sResponse.aItems[1].nInteger == m_sSession.nModeId)
+        {
+            const Value &sMode = sResponse.aItems[3];
+            if (sMode.nType != 5)
+                return false;
+            bool bBlockingFound = false, bModeFound = false;
+            m_sSession.bInputPending = false;
+            for (size_t nIndex = 0; nIndex + 1 < sMode.aItems.size(); nIndex += 2)
+            {
+                const Value &sKey   = sMode.aItems[nIndex];
+                const Value &sValue = sMode.aItems[nIndex + 1];
+                if (sKey.nType != 2)
+                    return false;
+                if (sKey.sString == "blocking" && sValue.nType == 4)
+                {
+                    bBlockingFound = true;
+                    m_sSession.bInputPending |= sValue.nInteger != 0;
+                }
+                if (sKey.sString == "mode" && sValue.nType == 2)
+                {
+                    bModeFound = true;
+                    m_sSession.bInputPending |= sValue.sString.starts_with("no") || sValue.sString == "c";
+                }
+            }
+            if (!bBlockingFound || !bModeFound)
+                return false;
+            m_sSession.nModeId = 0;
+            continue;
+        }
         if (m_sSession.nCaretId && sResponse.aItems[1].nInteger == m_sSession.nCaretId)
         {
             m_sSession.nCaretId = 0;
@@ -1048,6 +1077,47 @@ bool Backend_NVIM::PrepareHostKey()
     return true;
 }
 
+bool Backend_NVIM::PrepareMouseSelection(bool &bCancelled)
+{
+    bCancelled                = false;
+    const ULONGLONG nDeadline = GetTickCount64() + 5000;
+    do
+    {
+        // Unlike the state Lua RPC, this fast API responds while Neovim waits
+        // for input. An outstanding state request alone is not a pending command.
+        std::string sArgs;
+        AppendMsgPackArrayHeader(sArgs, 0);
+        if (!SendRpc("nvim_get_mode", sArgs, m_sSession.nModeId))
+            break;
+        while (m_sSession.nModeId)
+        {
+            if (GetTickCount64() >= nDeadline)
+                break;
+            if (!PollResponses())
+            {
+                StopAndReportError(L"Could not prepare Neovim for mouse input.");
+                return false;
+            }
+            if (m_sSession.nModeId)
+                Sleep(1);
+        }
+        if (m_sSession.nModeId)
+            break;
+        if (m_sSession.bInputPending)
+        {
+            bCancelled = true;
+            if (!SendKey("<Esc>") || !RequestNeovimState())
+                break;
+        }
+        // Polling may release keys queued behind a caret sync. Check their mode
+        // too, rather than blocking on a state request those keys cannot finish.
+        if (!m_sSession.nStateId && !m_sSession.nCaretId && !m_sSession.bInputPending)
+            return true;
+    } while (GetTickCount64() < nDeadline);
+    StopAndReportError(L"Could not prepare Neovim for mouse input.");
+    return false;
+}
+
 bool Backend_NVIM::LoadPluginConfig()
 {
     // Evaluate a separate returned table; no plugin settings are put in init.lua.
@@ -1121,10 +1191,16 @@ BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPA
     if (nMessage == WM_LBUTTONDOWN && !(wParam & MK_CONTROL) && !(GetKeyState(VK_MENU) & 0x8000) && !m_sSession.bFailed)
     {
         // Drain pre-gesture edits before Scintilla chooses positions in the text.
-        if (!PrepareHostKey())
+        if (!PrepareMouseSelection(m_bMouseCancelled) || m_bMouseCancelled)
             return TRUE;
         m_bMouseSelecting = true;
         ++m_sSession.nRevision;
+    }
+    if (m_bMouseCancelled && (nMessage == WM_MOUSEMOVE || nMessage == WM_LBUTTONUP || nMessage == WM_CAPTURECHANGED))
+    {
+        if (nMessage != WM_MOUSEMOVE)
+            m_bMouseCancelled = false;
+        return TRUE;
     }
     if (m_bMouseSelecting && (nMessage == WM_LBUTTONDOWN || nMessage == WM_MOUSEMOVE || nMessage == WM_LBUTTONUP ||
                               nMessage == WM_CAPTURECHANGED))
@@ -1460,6 +1536,7 @@ void Backend_NVIM::SuspendView()
     m_nSuppressedChar = -1;
     m_bMouseSelecting = false;
     m_bMouseFinishing = false;
+    m_bMouseCancelled = false;
     m_hWindow         = nullptr;
     m_sEditor         = EditorText(nullptr);
 }
