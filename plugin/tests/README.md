@@ -112,7 +112,53 @@ and `2` for setup, parsing, or report-writing failures.
 
 ## Focused Neovim checks
 
-The checks below have no Makefile targets and are separate from the JSON suite.
+The checks below are separate from the JSON suite. The CI targets build and run
+them together; the later sections also show individual commands.
+
+### Continuous integration
+
+The [Neovim workflow](../../.github/workflows/neovim-tests.yml) runs on pushes,
+pull requests, and manual requests. It has two jobs:
+
+- Portable checks: MessagePack and line updates with AddressSanitizer and
+  UndefinedBehaviorSanitizer, plus state snapshots, plugin configuration,
+  selection synchronization, and bootstrap configuration with local Neovim.
+- Build and integration: the Neovim host, both Neovim DLLs, the JSON cases,
+  host-key parsing, shortcut passthrough, document sessions, mouse selection,
+  UI/keyboard behavior, failure cleanup, and real/faulty-peer RPC transport.
+  Windows executables run under Wine on Ubuntu with an Xvfb virtual display.
+
+Neither job builds the native backend or runs fuzzing. The workflow downloads
+Neovim 0.12.6 and SciTE 5.6.9 (for its Scintilla DLL) with pinned SHA-256 checks.
+Only logs and JSON/text test reports are uploaded, retained for seven days;
+Neovim, DLLs, and runtime folders are not published as artifacts.
+
+From the repository root, the reusable commands are:
+
+```sh
+make -C plugin ci-portable
+make -C plugin ci-nvim-build
+make -C plugin testnvim WAIT_MS=200
+make -C plugin ci-nvim-integration
+```
+
+Supply the usual Windows dependency directories before building. Portable tests
+need `clang++` and local `nvim` on `PATH`. On a headless Linux machine, run the
+Wine commands under `xvfb-run -a`. The integration target expects the build target
+to have completed, uses temporary copies with clean configuration, and passes
+an explicit peer path to the RPC runner. Focused checks run sequentially to avoid
+competing for keyboard focus. Each check has a timeout; a failed check does not
+prevent independent focused checks from running. A failed build stops that job's
+runtime checks. The JSON suite uses a fixed 200 ms wait per case, not a completion
+signal. Failures still fail CI; they are not hidden by retries.
+
+Build/check logs go to `plugin/tests/functional/tmp/ci/`; the JSON reports remain
+under `plugin/tests/functional/tmp/reports/`. `CXX_PORTABLE` and `CXX_WINDOWS`
+can override the focused-check compilers. CI does not run actual Notepad++;
+release testing in the application is still needed.
+
+### Individual checks
+
 Python checks use local Neovim. Windows integration checks need Wine and the
 built Windows DLLs. Coverage described here comes from the test code; a passing
 check does not establish that the same behavior works inside Notepad++.

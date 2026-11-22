@@ -44,7 +44,8 @@ flowchart LR
 `VISIBLE=1` shows the test window. The test runner writes to
 `tests/functional/tmp/reports/` by default. Fuzzing has its own temporary
 directory and replaces the previous fuzz run. Focused checks under
-`tests/neovim/` have no Makefile targets. See the
+`tests/neovim/` run through `ci-portable`, `ci-nvim-build`, and
+`ci-nvim-integration`. See the
 [test guide](tests/README.md#focused-neovim-checks) for their commands and coverage.
 
 Replay requires `CASE=<id>`; `REPLAY_CASES=<json-file>` defaults to

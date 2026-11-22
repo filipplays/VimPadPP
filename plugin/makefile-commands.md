@@ -113,6 +113,15 @@ even when `TEST_PATH` selects a single file. `make -C plugin format-test-cases`
 runs the formatter by itself. `make -C plugin test-build` formats the cases and
 builds the native runner and dependencies without running the tests.
 
+## Continuous integration
+
+For Neovim-only CI commands, see the
+[test guide](tests/README.md#continuous-integration). `ci-portable` runs the
+portable checks, `ci-nvim-build` builds the Neovim binaries and focused Windows
+tests, and `ci-nvim-integration` runs those focused tests after building.
+The JSON suite remains `make -C plugin testnvim WAIT_MS=200`. These targets do
+not run fuzzing or build the native backend.
+
 ## Fuzzing
 
 ```sh

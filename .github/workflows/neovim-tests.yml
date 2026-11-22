@@ -1,0 +1,90 @@
+name: Neovim tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neovim-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Portable checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compiler and pinned Neovim
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+          curl --fail --location --retry 3 https://github.com/neovim/neovim/releases/download/v0.12.6/nvim-linux-x86_64.tar.gz -o "$RUNNER_TEMP/nvim.tar.gz"
+          echo "474430d53e6264f6d6dd18db42d6dc9df3a1b56ca9e88a325bbf860e1a811d87  $RUNNER_TEMP/nvim.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/nvim.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+      - name: Run portable checks with sanitizers
+        run: make -C plugin ci-portable
+      - name: Upload check logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-check-logs
+          path: plugin/tests/functional/tmp/ci/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  integration:
+    name: Neovim build and integration (Wine)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      WINEARCH: win64
+      WINEDEBUG: '-all'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and test tools
+        run: |
+          echo "WINEPREFIX=$RUNNER_TEMP/vimpad-wine" >> "$GITHUB_ENV"
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64-posix wine wine64 xvfb xauth unzip
+      - name: Download pinned test dependencies
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 https://github.com/neovim/neovim/releases/download/v0.12.6/nvim-win64.zip -o "$RUNNER_TEMP/nvim.zip"
+          echo "4e12b7103b601ffc8f25954b4da100f339faa73dccb69a5b135e897fa3d893ed  $RUNNER_TEMP/nvim.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/nvim.zip" -d "$RUNNER_TEMP/nvim-windows"
+          mkdir -p plugin/dependencies
+          cp -a "$RUNNER_TEMP/nvim-windows/nvim-win64" plugin/dependencies/neovim
+          curl --fail --location --retry 3 https://www.scintilla.org/wscite569.zip -o "$RUNNER_TEMP/scite.zip"
+          echo "68dabc521837f548298d584831c81b0fa5cddc7c21c2ef253f5b3cc56289a747  $RUNNER_TEMP/scite.zip" | sha256sum --check
+          mkdir -p plugin/dependencies/scintilla
+          unzip -p "$RUNNER_TEMP/scite.zip" wscite/Scintilla.dll > plugin/dependencies/scintilla/Scintilla.dll
+          unzip -p "$RUNNER_TEMP/scite.zip" wscite/License.txt > plugin/dependencies/scintilla/License.txt
+      - name: Build Neovim backend and integration tests
+        id: build
+        run: make -C plugin ci-nvim-build
+      - name: Initialize isolated Wine prefix
+        id: wine
+        run: xvfb-run -a sh -c 'wineboot -u && wineserver -w'
+      - name: Run Neovim JSON cases
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.wine.outcome == 'success' }}
+        run: xvfb-run -a make -C plugin testnvim WAIT_MS=200
+      - name: Run focused integration checks
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.wine.outcome == 'success' }}
+        run: xvfb-run -a make -C plugin ci-nvim-integration
+      - name: Upload reports and logs only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neovim-integration-reports
+          path: |
+            plugin/tests/functional/tmp/ci/*.log
+            plugin/tests/functional/tmp/reports/functional-report.*
+          if-no-files-found: warn
+          retention-days: 7

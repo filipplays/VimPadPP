@@ -240,3 +240,14 @@ clean:
 
 analysis:
 	cppcheck --xml -I ./include ./src 2> build/analysis.xml
+
+# CI entry points: Neovim only; existing native and fuzz targets are unchanged.
+.PHONY: ci-portable ci-nvim-build ci-nvim-integration
+ci-portable:
+	python3 tests/ci/run_checks.py portable
+
+ci-nvim-build:
+	python3 tests/ci/run_checks.py build
+
+ci-nvim-integration:
+	python3 tests/ci/run_checks.py integration
