@@ -23,6 +23,8 @@ class Backend_NVIM : public Backend
     void OnCaretMoved(LRESULT nPosition) override;
     bool PassesKeyToHost(WPARAM nKey) const override;
     bool PrepareHostKey() override;
+    void SuspendView();
+    bool ResumeView(HWND hWindow);
 
     BOOL bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) override;
 
@@ -96,6 +98,7 @@ class Backend_NVIM : public Backend
     bool                 m_bSyncSelection     = false;
     unsigned             m_nSelectionRevision = 0;
     LRESULT              m_nSelectionAnchor   = 0;
+    LRESULT              m_nViewAnchor        = 0;
     int                  m_nSuppressedChar    = -1;
     bool                 m_bPassThroughKey    = false;
     LPARAM               m_nPassThroughScan   = 0;
@@ -118,6 +121,7 @@ class Backend_NVIM : public Backend
     bool SendRpc(const std::string &sMethod, const std::string &sArguments, unsigned &nId, bool bNotification = false);
     bool CallRpcAndWait(const std::string &sMethod, const std::string &sArguments, Value &sResult);
     bool AttachUi();
+    bool CreateCommandBar();
     bool HandleNotification(const Value &sNotification);
     void UpdateCommandBar();
     void PositionCommandBar();

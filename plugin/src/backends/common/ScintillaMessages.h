@@ -6,6 +6,10 @@
 // the small, documented part of the Scintilla message API used by VimEngine.
 namespace Scintilla
 {
+constexpr UINT CREATEDOCUMENT     = 2375;
+constexpr UINT ADDREFDOCUMENT     = 2376;
+constexpr UINT RELEASEDOCUMENT    = 2377;
+constexpr UINT SETDOCPOINTER      = 2358;
 constexpr UINT ADDTEXT            = 2001;
 constexpr UINT INSERTTEXT         = 2003;
 constexpr UINT DELETERANGE        = 2645;

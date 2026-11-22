@@ -6,9 +6,8 @@
   and attaches the integration to the host's Scintilla views.
 - `plugin/src/main.cpp` is the standalone Scintilla host.
 - `plugin/src/backends/common/` contains the `Manager`, the `Backend`
-  interface, and Scintilla/editor-text helpers. `Manager` owns a backend
-  session for each installed Scintilla window and subclasses the window to
-  route messages.
+  interface, and Scintilla/editor-text helpers. `Manager` subclasses installed Scintilla windows to route messages. Native
+  sessions belong to windows; Neovim sessions belong to Scintilla documents.
 - `plugin/src/backends/native/` implements the native backend and `VimEngine`.
   The engine's commands, motions, actions, and operators are split across
   source files in that directory.
@@ -31,7 +30,18 @@ backend passes relevant keyboard input to `VimEngine`; the Neovim backend
 communicates with its process and applies state to the editor. Shared editor
 helpers wrap Scintilla messages.
 
-Each installed Neovim backend session starts its own embedded Neovim process
+The Neovim manager creates a session on a document's first activation (or first
+input in the standalone host), and retains it across tab switches. Each document
+has its own embedded Neovim process; clones in both views share that process.
+A session is attached to one view at a time, transferring on focus/input.
+Inactive sessions retain their pipes, pending requests, and Vim input state, but
+pause response polling. Responses are consumed when the document is attached
+again; inactive documents do not receive background edits. Document references
+prevent Scintilla pointer reuse until session cleanup. Notepad++ buffer activation
+records the buffer identity, and the final close notification releases the session.
+Disabling the plugin or shutting down releases all sessions.
+
+Each Neovim backend session starts its own embedded Neovim process
 and exchanges MessagePack-RPC messages over standard input and output pipes.
 Requests have the form `[0, id, method, arguments]`, responses are
 `[1, id, error, result]`, and notifications are `[2, method, arguments]`.
@@ -51,11 +61,11 @@ Lua RPC connection at installation. This returned table holds plugin settings;
 `init.lua` and `init.vim` remain ordinary Neovim configuration. A missing plugin
 config uses empty defaults. Invalid settings fail installation with an error.
 The shared manager's message hook checks each session's configured physical
-shortcuts before intercepting Ctrl accelerators. Configured shortcuts first
-drain pending state/caret replies (with a five-second timeout), then continue
-through the host accelerator path. The backend also passes their keydown and
+shortcuts before intercepting Ctrl accelerators. Configured shortcuts immediately continue through the host accelerator path.
+Saving writes the current Scintilla text, even if Neovim is waiting for a mapping
+or motion character. Later applied edits make the document modified again. The backend also passes their keydown and
 translated character messages through to Scintilla when no accelerator claims
-them. Refresh recreates both sessions, reloading both configurations. The native
+them. Refresh releases all document sessions and recreates the visible sessions, reloading both configurations. The native
 backend currently has no plugin-config loader.
 
 The Neovim state helper is installed during authoritative host-to-Neovim

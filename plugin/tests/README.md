@@ -173,11 +173,30 @@ Run `PassthroughTests.exe` in an isolated directory containing the built Neovim
 return {passthrough_keys = {"<C-s>", "<C-Tab>", "<C-S-Tab>"}}
 ```
 
+To exercise the manager's Notepad++ document activation/close entry points as
+well as shared-view attachment, compile the same test directly with the backend:
+
+```sh
+x86_64-w64-mingw32-g++ -std=c++20 -Wall -Wextra -Wpedantic \
+  -DTEST_DOCUMENT_MANAGER -DVIM_MOTIONS_BUILD \
+  -Isrc/backends/common -Isrc/backends/neovim \
+  tests/neovim/passthrough_test.cpp src/backends/common/backend_manager.cpp \
+  src/backends/common/backend_common.cpp src/backends/common/editor_text.cpp \
+  src/backends/common/scintilla_editor.cpp src/backends/common/helpers.cpp \
+  src/backends/neovim/neovim_backend.cpp -o /private/tmp/DocumentManagerTests.exe \
+  -lcomctl32 -static -static-libgcc -static-libstdc++
+```
+
+Stage and run this executable in the same isolated runtime directory described
+above. This variant also checks shared document attachment to a second view and
+closing an inactive document with pending Vim input, including a duplicate close.
+
 The integration test creates a host window with accelerator bindings. It checks
-that configured shortcuts reach the host, saving sees pending edits, extra
+that configured shortcuts reach the host without waiting for pending edits, extra
 modifiers do not match, Ctrl+V still belongs to Neovim, and translated
 characters pass through even after Ctrl is released. It also checks that
-subsequent ordinary input returns to Neovim. The test does not load Notepad++
+subsequent ordinary input returns to Neovim, and a pending `f` survives switching
+Scintilla documents while another document is edited independently. The test does not load Notepad++
 or verify its actual tab switching, menu commands, or two-view lifecycle.
 
 ## Neovim mouse selections

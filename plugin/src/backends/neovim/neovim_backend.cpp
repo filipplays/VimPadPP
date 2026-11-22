@@ -627,6 +627,7 @@ void Backend_NVIM::OnCaretMoved(LRESULT nPosition)
         GetEditorText() != m_sSession.sText)
         return;
     m_sSession.nKnownCaret = nPosition;
+    m_nViewAnchor          = m_sEditor.Send(Scintilla::GETANCHOR);
     ++m_sSession.nRevision;
     const Mode eMode = m_sSession.eMode;
     if ((eMode == Mode::Normal || eMode == Mode::VisualCharacter || eMode == Mode::VisualLine ||
@@ -1045,6 +1046,7 @@ Backend_NVIM::SyncResult Backend_NVIM::SyncDocument(const Value &sResult)
     }
     EnsureCaretVisible();
     m_sSession.nKnownCaret        = m_sEditor.Caret();
+    m_nViewAnchor                 = m_sEditor.Send(Scintilla::GETANCHOR);
     // Never acknowledge stale, skipped or partially applied snapshots.
     m_sSession.nSyncedBuffer      = nBuffer;
     m_sSession.nSyncedChangedTick = nChangedTick;
@@ -1275,7 +1277,7 @@ BOOL Backend_NVIM::bHandle_input(HWND hWindow, UINT nMessage, WPARAM wParam, LPA
         if (m_bPassThroughKey)
         {
             m_nSuppressedChar = -1;
-            return PrepareHostKey() ? FALSE : TRUE;
+            return FALSE;
         }
     }
     if ((nMessage == WM_CHAR || nMessage == WM_SYSCHAR) && m_bPassThroughKey &&
@@ -1500,15 +1502,11 @@ BOOL Backend_NVIM::Install()
         SetLastError(ERROR_PROCESS_ABORTED);
         return FALSE;
     }
-    m_hCommandBar = CreateWindowExW(
-        0, L"STATIC", L"", WS_CHILD | WS_BORDER | SS_LEFT | SS_NOPREFIX, 0, 0, 0, 0, m_hWindow, nullptr,
-        GetModuleHandleW(nullptr), nullptr);
-    if (!m_hCommandBar)
+    if (!CreateCommandBar())
     {
         StopAndReportError(L"Could not create the Neovim command bar.");
         return FALSE;
     }
-    SendMessageW(m_hCommandBar, WM_SETFONT, SendMessageW(m_hWindow, WM_GETFONT, 0, 0), FALSE);
     if (!AttachUi())
     {
         StopAndReportError(
@@ -1543,6 +1541,7 @@ BOOL Backend_NVIM::Install()
         return FALSE;
     LRESULT nPosition      = m_sEditor.Caret();
     m_sSession.nKnownCaret = nPosition;
+    m_nViewAnchor          = m_sEditor.Send(Scintilla::GETANCHOR);
     LRESULT nLine          = m_sEditor.Send(Scintilla::LINEFROMPOSITION, nPosition);
     LRESULT nColumn        = nPosition - m_sEditor.LineStart(nPosition);
     if (!SyncNeovim(m_sSession.sText, nLine, nColumn))
@@ -1568,4 +1567,61 @@ BOOL Backend_NVIM::Uninstall()
     (void)m_sEditor.Send(Scintilla::SETCARETSTYLE, m_nOriginalCaretStyle);
     (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, m_nOriginalCaretPeriod);
     return TRUE;
+}
+
+void Backend_NVIM::SuspendView()
+{
+    if (!m_hWindow)
+        return;
+    if (m_sSession.nTimer)
+        KillTimer(m_hWindow, m_sSession.nTimer);
+    m_sSession.nTimer = 0;
+    if (m_hCommandBar)
+        DestroyWindow(m_hCommandBar);
+    m_hCommandBar = nullptr;
+    if (m_bScrollPastEnd)
+        (void)m_sEditor.Send(Scintilla::SETENDATLASTLINE, m_bOriginalEndAtLastLine);
+    m_bScrollPastEnd = false;
+    (void)m_sEditor.Send(Scintilla::SETCARETSTYLE, m_nOriginalCaretStyle);
+    (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, m_nOriginalCaretPeriod);
+    m_bPassThroughKey = false;
+    m_nSuppressedChar = -1;
+    m_bMouseSelecting = false;
+    m_bMouseFinishing = false;
+    m_hWindow         = nullptr;
+    m_sEditor         = EditorText(nullptr);
+}
+
+bool Backend_NVIM::ResumeView(HWND hWindow)
+{
+    m_hWindow              = hWindow;
+    m_sEditor              = EditorText(hWindow);
+    m_nOriginalCaretStyle  = m_sEditor.Send(Scintilla::GETCARETSTYLE);
+    m_nOriginalCaretPeriod = m_sEditor.Send(Scintilla::GETCARETPERIOD);
+    if (m_sSession.bFailed)
+        return true;
+    if (!CreateCommandBar())
+        return false;
+    const bool bInsert = m_sSession.eMode == Mode::Insert || m_sSession.eMode == Mode::Replace;
+    (void)m_sEditor.Send(Scintilla::SETCARETSTYLE, bInsert ? Scintilla::CARETSTYLE_LINE : Scintilla::CARETSTYLE_BLOCK);
+    (void)m_sEditor.Send(Scintilla::SETCARETPERIOD, bInsert ? m_nOriginalCaretPeriod : 0);
+    if (!SetTimer(hWindow, NeovimResponseTimerId, 10, nullptr))
+        return false;
+    m_sSession.nTimer         = NeovimResponseTimerId;
+    m_sSession.bApplyingState = true;
+    (void)m_sEditor.Send(Scintilla::SETSEL, m_nViewAnchor, m_sSession.nKnownCaret);
+    UpdateCommandBar();
+    m_sSession.bApplyingState = false;
+    return true;
+}
+
+bool Backend_NVIM::CreateCommandBar()
+{
+    m_hCommandBar = CreateWindowExW(
+        0, L"STATIC", L"", WS_CHILD | WS_BORDER | SS_LEFT | SS_NOPREFIX, 0, 0, 0, 0, m_hWindow, nullptr,
+        GetModuleHandleW(nullptr), nullptr);
+    if (!m_hCommandBar)
+        return false;
+    SendMessageW(m_hCommandBar, WM_SETFONT, SendMessageW(m_hWindow, WM_GETFONT, 0, 0), FALSE);
+    return true;
 }

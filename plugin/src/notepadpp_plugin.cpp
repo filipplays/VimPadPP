@@ -28,6 +28,11 @@ struct SCNotification;
 namespace
 {
 constexpr UINT    NPPN_READY               = 1001;
+constexpr UINT    NPPN_FILECLOSED          = 1005;
+constexpr UINT    NPPN_BUFFERACTIVATED     = 1010;
+constexpr UINT    NPPM_GETNBOPENFILES      = WM_USER + 1000 + 7;
+constexpr UINT    NPPM_GETBUFFERIDFROMPOS  = WM_USER + 1000 + 59;
+constexpr UINT    NPPM_GETCURRENTDOCINDEX  = WM_USER + 1000 + 23;
 constexpr UINT    NPPN_SHUTDOWN            = 1009;
 constexpr UINT    SCN_UPDATEUI             = 2007;
 constexpr UINT    NPPM_DOOPEN              = WM_USER + 1000 + 77;
@@ -74,6 +79,17 @@ bool InstallViews()
             g_xManager.UninstallVim(g_sNpp.hSecondScintilla);
     }
     g_bEnabled = bMainInstalled && bSecondInstalled;
+    if (g_bEnabled)
+    {
+        for (int nView = 0; nView < 2; ++nView)
+        {
+            const LRESULT nIndex = SendMessageW(g_sNpp.hNotepad, NPPM_GETCURRENTDOCINDEX, 0, nView);
+            if (nIndex >= 0)
+                g_xManager.ActivateDocument(
+                    nView == 0 ? g_sNpp.hMainScintilla : g_sNpp.hSecondScintilla,
+                    SendMessageW(g_sNpp.hNotepad, NPPM_GETBUFFERIDFROMPOS, nIndex, nView));
+        }
+    }
     UpdateToggleMenu();
     return g_bEnabled;
 }
@@ -244,6 +260,26 @@ extern "C" __declspec(dllexport) void beNotified(SCNotification *pNotification)
         return;
     if (pHeader->code == NPPN_READY)
         AttachViews();
+    else if (pHeader->code == NPPN_BUFFERACTIVATED && g_bEnabled)
+    {
+        int nView = 0;
+        SendMessageW(g_sNpp.hNotepad, NPPM_GETCURRENTSCINTILLA, 0, reinterpret_cast<LPARAM>(&nView));
+        g_xManager.ActivateDocument(nView == 0 ? g_sNpp.hMainScintilla : g_sNpp.hSecondScintilla, pHeader->idFrom);
+    }
+    else if (pHeader->code == NPPN_FILECLOSED)
+    {
+        bool bStillOpen = false;
+        for (int nView = 0; nView < 2; ++nView)
+        {
+            const LRESULT nCount = SendMessageW(g_sNpp.hNotepad, NPPM_GETNBOPENFILES, 0, nView + 1);
+            for (LRESULT nIndex = 0; nIndex < nCount; ++nIndex)
+                if (static_cast<UINT_PTR>(SendMessageW(g_sNpp.hNotepad, NPPM_GETBUFFERIDFROMPOS, nIndex, nView)) ==
+                    pHeader->idFrom)
+                    bStillOpen = true;
+        }
+        if (!bStillOpen)
+            g_xManager.CloseDocument(pHeader->idFrom);
+    }
     else if (pHeader->code == NPPN_SHUTDOWN)
         DetachViews();
 }

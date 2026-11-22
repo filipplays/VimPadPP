@@ -1,5 +1,7 @@
 # Architectural decisions
 
+- [Neovim sessions belong to documents](neovim-document-sessions.md)
+
 Add a decision record when a consequential choice needs a durable explanation
 of its context and tradeoffs. Routine implementation choices do not need one.
 Create records only when authorized to change project files.
