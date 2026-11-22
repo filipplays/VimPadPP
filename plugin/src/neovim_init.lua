@@ -7,6 +7,8 @@ local function load_config()
   local sDefaults = sNeovimDir .. "/init.lua"
   if vim.fn.filereadable(sDefaults) == 1 then
     dofile(sDefaults)
+  elseif vim.fn.filereadable(sNeovimDir .. "/init.vim") == 1 then
+    vim.cmd("source " .. vim.fn.fnameescape(sNeovimDir .. "/init.vim"))
   end
 
   vim.opt.runtimepath:prepend(sConfigDir)
